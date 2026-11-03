@@ -29,6 +29,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "tsc",
     "build:watch": "tsc --watch",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run clean && npm run build"
