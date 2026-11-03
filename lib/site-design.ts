@@ -1,4 +1,4 @@
-import type { SiteDesignKey, SiteFontKey } from '@/types'
+import type { SiteDesignKey, SiteFontKey } from '../types/index.js'
 
 // Choosable auto-website templates. `classic` is the existing flagship look
 // (every current site); maison/bolt/craft are the A/B/C references.
