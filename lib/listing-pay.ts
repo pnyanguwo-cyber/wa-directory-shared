@@ -3,6 +3,7 @@ import { getSupabase } from './supabase-server.js'
 import { SITE_URL } from './site-url.js'
 import { digitsOnly } from './phone.js'
 import { PLAN_CONFIG, PRO_ASSISTANCE_PRICE, type PlanType } from '../types/index.js'
+import type { PaymentEventOutcome } from './payment-events.js'
 
 export interface CreateListingPaymentInput {
   businessId: string
@@ -14,7 +15,7 @@ export interface CreateListingPaymentInput {
 
 export interface PaymentAdapters {
   initiateEcoCashPayment?: (params: { reference: string; amount: number; phone: string; additionalInfo: string; resultUrl: string }) => Promise<{ ok: boolean; pollUrl?: string; paynowReference?: string; instructions?: string; error?: string }>
-  logPaymentEvent?: (params: { eventType: string; businessId: string; detail?: Record<string, unknown>; request?: Request }) => Promise<void>
+  logPaymentEvent?: (params: { eventType: string; outcome?: PaymentEventOutcome; businessId: string; detail?: Record<string, unknown>; request?: Request }) => Promise<void>
   sendWhatsAppMessage?: (phone: string, text: string) => Promise<void>
 }
 
@@ -126,6 +127,13 @@ export async function createListingPayment(
         eventType: 'payment_initiated',
         businessId: bizId,
         detail: { via: 'listing_pay', plan: input.plan, amount, paynowRef: init.paynowReference },
+      })
+    } else {
+      await adapters.logPaymentEvent?.({
+        eventType: 'payment_init_failed',
+        outcome: 'error',
+        businessId: bizId,
+        detail: { via: 'listing_pay', error: init.error || 'unknown' },
       })
     }
   }

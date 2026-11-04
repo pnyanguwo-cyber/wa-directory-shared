@@ -15,7 +15,7 @@
 import { createHash } from 'crypto'
 import { getSupabase } from './supabase-server.js'
 
-type PaymentEventOutcome = 'ok' | 'error' | 'rejected' | 'pending'
+export type PaymentEventOutcome = 'ok' | 'error' | 'rejected' | 'pending'
 
 export interface PaymentEventInput {
   eventType: string
