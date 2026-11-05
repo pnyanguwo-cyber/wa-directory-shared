@@ -121,7 +121,7 @@ export async function initiateEcoCashPayment(opts: {
     amount: opts.amount.toFixed(2),
     id: cfg.id,
     additionalinfo: opts.additionalInfo || '',
-    authemail: opts.email || 'payments-wadirectory@proton.me',
+    authemail: opts.email || 'infinitymetersolutions@gmail.com',
     phone,
     method: 'ecocash',
     status: 'Message',
