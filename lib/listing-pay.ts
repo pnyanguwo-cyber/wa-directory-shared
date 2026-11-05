@@ -14,7 +14,7 @@ export interface CreateListingPaymentInput {
 }
 
 export interface PaymentAdapters {
-  initiateEcoCashPayment?: (params: { reference: string; amount: number; phone: string; additionalInfo: string; resultUrl: string }) => Promise<{ ok: boolean; pollUrl?: string; paynowReference?: string; instructions?: string; error?: string }>
+  initiateEcoCashPayment?: (params: { reference: string; amount: number; phone: string; additionalInfo: string; resultUrl: string; returnUrl?: string }) => Promise<{ ok: boolean; pollUrl?: string; paynowReference?: string; instructions?: string; error?: string }>
   logPaymentEvent?: (params: { eventType: string; outcome?: PaymentEventOutcome; businessId: string; detail?: Record<string, unknown>; request?: Request }) => Promise<void>
   sendWhatsAppMessage?: (phone: string, text: string) => Promise<void>
 }
