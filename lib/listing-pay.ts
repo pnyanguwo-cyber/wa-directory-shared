@@ -116,6 +116,7 @@ export async function createListingPayment(
       phone: payerClean,
       additionalInfo: `WA Directory listing: ${(business as { name: string }).name} (${planLabel})`,
       resultUrl: `${SITE_URL}/api/paynow/result`,
+      returnUrl: `${SITE_URL}/`,
     })
     if (init.ok && init.pollUrl) {
       await supabase
