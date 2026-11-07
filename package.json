@@ -1,6 +1,6 @@
 {
   "name": "@wa-directory/shared",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Shared libraries for WA Directory webapp and chatbot",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

@@ -8,6 +8,7 @@
 
 import { zimbabweCities } from '../data/zimbabwe-locations'
 import { getSupabase } from './supabase-server'
+import { matchCategoryAgainst, type ApprovedCategory } from './approved-data'
 
 export type LearnedKind = 'city' | 'area' | 'category'
 
@@ -216,4 +217,29 @@ export async function findAreaLearned(city: string, text: string): Promise<strin
     return area
   }
   return null
+}
+
+// Category resolution against the approved list. Deterministic matches are
+// returned as-is; fuzzy hits are learned so the next identical phrasing is
+// an exact lookup. A learned value no longer in the approved list is ignored.
+// Returns 'Other' when unresolved.
+export async function matchCategoryLearned(
+  text: string,
+  approved: ApprovedCategory[]
+): Promise<string> {
+  const norm = normalizeLearnedRaw(text)
+  if (!norm) return 'Other'
+
+  const learned = await lookupLearnedMapping('category', norm)
+  if (learned && approved.some((c) => c.name === learned)) return learned
+
+  const direct = matchCategoryAgainst(text, approved)
+  if (direct !== 'Other') return direct
+
+  const name = resolveFuzzy(norm, approved.map((c) => c.name))
+  if (name) {
+    await learnMapping('category', norm, name)
+    return name
+  }
+  return 'Other'
 }
