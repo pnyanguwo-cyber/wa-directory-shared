@@ -38,7 +38,7 @@ export function compileOrderText(input: {
     .filter(l => l.qty > 0)
     .slice(0, MAX_LINES)
     .map((l, i) => {
-      const price = l.price != null ? ` — $${money(l.price)}` : ''
+      const price = l.price != null ? ` - $${money(l.price)}` : ''
       const item = `${i + 1}. ${l.name.split('\n')[0].slice(0, 60)} ×${l.qty}${price}`
       return item
     })
@@ -47,7 +47,7 @@ export function compileOrderText(input: {
   const total = known.length ? known.reduce((s, l) => s + (l.price || 0) * l.qty, 0) : null
 
   const out: string[] = []
-  out.push(`🧺 *Order — ${name}*`)
+  out.push(`🧺 *Order - ${name}*`)
   if (city) out.push(`📍 ${city}`)
   out.push(...lines.map(s => s.slice(0, 90)))
   if (total != null) out.push(`*Total: $${money(total)}*`)

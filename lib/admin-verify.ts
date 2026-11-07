@@ -179,14 +179,14 @@ export async function notifyBusinessLive(biz: {
     `🏢 Profile: ${SITE_URL}/business/${slug}`,
     `🌐 Website: ${SITE_URL}/site/${slug}`,
     ...(biz.username ? [`🔑 Portal: ${SITE_URL}/portal (log in with @${biz.username})`] : []),
-    '📸 Send a product photo, then reply *name price* (e.g. *bread $2*) — it lands on your website shop shelf.',
+    '📸 Send a product photo, then reply *name price* (e.g. *bread $2*) - it lands on your website shop shelf.',
   ]
   sendWhatsAppMessage(
     to,
     [
       '🎉 *You are live on WA Directory!*',
       '',
-      `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} — customers can find you in search now.`,
+      `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} - customers can find you in search now.`,
       '',
       ...links,
       '',

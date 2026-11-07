@@ -167,151 +167,183 @@ export const zimbabweCities: LocationCity[] = [
     areas: ['Redcliff CBD'],
   },
   {
+    name: 'Karoi',
+    areas: ['Karoi CBD'],
+  },
+  {
+    name: 'Banket',
+    areas: ['Banket CBD'],
+  },
+  {
+    name: 'Concession',
+    areas: ['Concession CBD'],
+  },
+  {
+    name: 'Mhangura',
+    areas: ['Mhangura CBD'],
+  },
+  {
+    name: 'Chivhu',
+    areas: ['Chivhu CBD'],
+  },
+  {
+    name: 'Mutoko',
+    areas: ['Mutoko CBD'],
+  },
+  {
+    name: 'Macheke',
+    areas: ['Macheke CBD'],
+  },
+  {
+    name: 'Chirundu',
+    areas: ['Chirundu CBD'],
+  },
+  {
     name: 'Buhera',
-    areas: [],
+    areas: ['Buhera CBD'],
   },
   {
     name: 'Chimanimani',
-    areas: [],
+    areas: ['Chimanimani CBD'],
   },
   {
     name: 'Mutasa',
-    areas: [],
+    areas: ['Mutasa CBD'],
   },
   {
     name: 'Centenary',
-    areas: [],
+    areas: ['Centenary CBD'],
   },
   {
     name: 'Guruve',
-    areas: [],
+    areas: ['Guruve CBD'],
   },
   {
     name: 'Mazowe',
-    areas: [],
+    areas: ['Mazowe CBD'],
   },
   {
     name: 'Mt Darwin',
-    areas: [],
+    areas: ['Mt Darwin CBD'],
   },
   {
     name: 'Rushinga',
-    areas: [],
+    areas: ['Rushinga CBD'],
   },
   {
     name: 'Shamva',
-    areas: [],
+    areas: ['Shamva CBD'],
   },
   {
     name: 'Chikomba',
-    areas: [],
+    areas: ['Chikomba CBD'],
   },
   {
     name: 'Goromonzi',
-    areas: [],
+    areas: ['Goromonzi CBD'],
   },
   {
     name: 'Mudzi',
-    areas: [],
+    areas: ['Mudzi CBD'],
   },
   {
     name: 'Murehwa',
-    areas: [],
+    areas: ['Murehwa CBD'],
   },
   {
     name: 'Uzumba-Maramba-Pfungwe',
-    areas: [],
+    areas: ['Uzumba-Maramba-Pfungwe CBD'],
   },
   {
     name: 'Wedza',
-    areas: [],
+    areas: ['Wedza CBD'],
   },
   {
     name: 'Hurungwe',
-    areas: [],
+    areas: ['Hurungwe CBD'],
   },
   {
     name: 'Makonde',
-    areas: [],
+    areas: ['Makonde CBD'],
   },
   {
     name: 'Zvimba',
-    areas: [],
+    areas: ['Zvimba CBD'],
   },
   {
     name: 'Bikita',
-    areas: [],
+    areas: ['Bikita CBD'],
   },
   {
     name: 'Chivi',
-    areas: [],
+    areas: ['Chivi CBD'],
   },
   {
     name: 'Gutu',
-    areas: [],
+    areas: ['Gutu CBD'],
   },
   {
     name: 'Mwenezi',
-    areas: [],
+    areas: ['Mwenezi CBD'],
   },
   {
     name: 'Zaka',
-    areas: [],
+    areas: ['Zaka CBD'],
   },
   {
     name: 'Binga',
-    areas: [],
+    areas: ['Binga CBD'],
   },
   {
     name: 'Bubi',
-    areas: [],
+    areas: ['Bubi CBD'],
   },
   {
     name: 'Nkayi',
-    areas: [],
+    areas: ['Nkayi CBD'],
   },
   {
     name: 'Tsholotsho',
-    areas: [],
+    areas: ['Tsholotsho CBD'],
   },
   {
     name: 'Umguza',
-    areas: [],
+    areas: ['Umguza CBD'],
   },
   {
     name: 'Bulilima',
-    areas: [],
+    areas: ['Bulilima CBD'],
   },
   {
     name: 'Insiza',
-    areas: [],
+    areas: ['Insiza CBD'],
   },
   {
     name: 'Mangwe',
-    areas: [],
+    areas: ['Mangwe CBD'],
   },
   {
     name: 'Matobo',
-    areas: [],
+    areas: ['Matobo CBD'],
   },
   {
     name: 'Umzingwane',
-    areas: [],
+    areas: ['Umzingwane CBD'],
   },
   {
     name: 'Chirumhanzu',
-    areas: [],
+    areas: ['Chirumhanzu CBD'],
   },
   {
     name: 'Gokwe North',
-    areas: [],
+    areas: ['Gokwe North CBD'],
   },
   {
     name: 'Gokwe South',
-    areas: [],
+    areas: ['Gokwe South CBD'],
   },
   {
     name: 'Mberengwa',
-    areas: [],
+    areas: ['Mberengwa CBD'],
   },
 ]

@@ -428,7 +428,7 @@ export async function searchesInWindow(fromIso: string, toIso: string, limit = 3
 
 function phoneDisplay(raw: string): string {
   const d = (raw || '').replace(/\D/g, '')
-  if (!d) return '—'
+  if (!d) return '-'
   return `+${d.slice(0, 3)} ${d.slice(3).replace(/(\d{3})(?=\d)/g, '$1 ')}`
 }
 
@@ -460,7 +460,7 @@ export async function compileDigest(fromIso: string, toIso: string): Promise<str
         const n = rows[i]
         // Admin ask: every request reads as item · quantity · location, with
         // the buyer's contact one tap away.
-        const head = [n.qty ? `${n.qty} ×`.trim() : '', n.item].filter(Boolean).join(' ') || '—'
+        const head = [n.qty ? `${n.qty} ×`.trim() : '', n.item].filter(Boolean).join(' ') || '-'
         const details = [
           n.budget ? `budget ${n.budget}` : '',
         ].filter(Boolean).join(' · ')
@@ -520,7 +520,7 @@ export async function compileDigest(fromIso: string, toIso: string): Promise<str
 
     return lines.join('\n')
   } catch {
-    return 'Digest failed to compile — try again in a moment.'
+    return 'Digest failed to compile - try again in a moment.'
   }
 }
 
@@ -533,11 +533,11 @@ export function channelPostFor(need: {
   city: string
 }): string {
   const botNumber = (process.env.WHATSAPP_BOT_NUMBER || '').replace(/\D/g, '')
-  const wa = botNumber ? `https://wa.me/${botNumber}?text=${encodeURIComponent(`${need.rq_id} quote`)}` : '(channel link pending — set WHATSAPP_BOT_NUMBER)'
+  const wa = botNumber ? `https://wa.me/${botNumber}?text=${encodeURIComponent(`${need.rq_id} quote`)}` : '(channel link pending - set WHATSAPP_BOT_NUMBER)'
   return [
     `🛒 NEED · ${(need.city || 'ZIMBABWE').toUpperCase()} · ${need.rq_id}`,
     [need.qty, need.item].filter(Boolean).join(' ') || need.item,
-    need.budget ? `Budget: ${need.budget}` : 'Budget: open — quote yours',
+    need.budget ? `Budget: ${need.budget}` : 'Budget: open - quote yours',
     '',
     `👉 Quoting: reply *${need.rq_id} $your-price* here, or tap:`,
     wa,

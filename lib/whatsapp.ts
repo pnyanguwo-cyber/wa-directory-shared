@@ -111,7 +111,7 @@ export async function sendLocationRequest(to: string, body: string) {
       messaging_product: 'whatsapp',
       to,
       type: 'text',
-      text: { body: `${cleanBody}\n\n(Please send your location, or type your town — e.g. *harare*.)` },
+      text: { body: `${cleanBody}\n\n(Please send your location, or type your town - e.g. *harare*.)` },
     })
   }
 }

@@ -81,7 +81,7 @@ export function parseCastSpec(arg: string): { spec: CastSpec | null; error?: str
 
   // Scheduled form: today|tonight|tomorrow [+ at] HH[:]MM [am|pm] <body>.
   // Also allowed after a city/category filter token ("owners harare today 9am …").
-  const TIME_ERR = 'That time looks off — use e.g. *today 15:30* or *tomorrow 9am*.'
+  const TIME_ERR = 'That time looks off - use e.g. *today 15:30* or *tomorrow 9am*.'
   const trySchedule = (text: string): { spec: CastSpec; rest: string } | { badTime: true } | null => {
     const schedM = text.match(
       /^(today|tonight|tomorrow)(?:\s+at)?\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?(?:\s+([\s\S]+))?$/i
@@ -395,7 +395,7 @@ export async function renderCastsList(): Promise<string> {
       failed_count: number | null
     }[]) || []
     if (!rows.length) {
-      return 'No casts yet — start one with *cast your announcement*.'
+      return 'No casts yet - start one with *cast your announcement*.'
     }
     const lines = ['📣 *Recent casts*', '']
     for (const r of rows) {
@@ -415,7 +415,7 @@ export async function renderCastsList(): Promise<string> {
     lines.push('', 'Cancel with *cast cancel <id>*.')
     return lines.join('\n')
   } catch {
-    return 'Could not load casts right now — try again shortly.'
+    return 'Could not load casts right now - try again shortly.'
   }
 }
 

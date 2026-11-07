@@ -86,7 +86,7 @@ export async function activateListingSubscription(
       sendWhatsAppMessage(
         business.phone,
         [
-          '🎉 *Payment received — you are live!*',
+          '🎉 *Payment received - you are live!*',
           '',
           `${business.name} (@${business.username || 'N/A'}) is now visible on WA Directory.`,
           `Active until ${expiresAt.toISOString().slice(0, 10)}.`,
@@ -94,7 +94,7 @@ export async function activateListingSubscription(
           ...links,
           '',
           `Renew anytime: ${siteUrl}/pay`,
-          '📸 After go-live: send a product photo, then reply *name price* (e.g. *bread $2*) — it lands on your website shop shelf.',
+          '📸 After go-live: send a product photo, then reply *name price* (e.g. *bread $2*) - it lands on your website shop shelf.',
         ].join('\n')
       ).catch(() => {})
 
