@@ -153,6 +153,33 @@ export const PERSONAL_PLAN_CONFIG: Record<PlanType, { label: string; months: num
 
 export const PRO_ASSISTANCE_PRICE = 2.0
 
+// === Authoritative trial configuration ===
+// Business listings may start with one 90-day free trial. The trial starts
+// when an administrator approves/publishes the listing — never at registration
+// or submission — and is a zero-amount subscription, not a discount.
+export const TRIAL_DAYS = 90
+export const TRIAL_PLAN_LABEL = '90-Day Free Trial'
+export const TRIAL_PRICE = 0
+
+export type TrialStatus = 'none' | 'requested' | 'active' | 'expiring' | 'expired' | 'converted'
+
+/** Format a USD amount the way every surface (bot, portal, admin) shows it. */
+export function formatUsd(amount: number): string {
+  return `$${Number(amount).toFixed(2)}`
+}
+
+/** Human label + price for a business plan, derived from PLAN_CONFIG only. */
+export function businessPlanLabel(plan: PlanType): string {
+  const p = PLAN_CONFIG[plan]
+  return `${p.label} — USD ${formatUsd(p.price)}`
+}
+
+/** Human label + price for a personal-contact plan. */
+export function personalPlanLabel(plan: PlanType): string {
+  const p = PERSONAL_PLAN_CONFIG[plan]
+  return `${p.label} — USD ${formatUsd(p.price)}`
+}
+
 export type StatsEventType =
   | 'profile_view'
   | 'click_whatsapp'

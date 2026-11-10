@@ -23,3 +23,6 @@ export function getSupabase(): SupabaseClient {
 
   return client
 }
+
+// Alias for clarity - service role is used in server components
+export const getSupabaseAdmin = getSupabase
