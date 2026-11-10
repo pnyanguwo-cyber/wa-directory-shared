@@ -1,13 +1,13 @@
 import { getCached, setCached } from './ai-cache.js'
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
+export const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`
 
 // Single Gemini entry point: posts one prompt, returns the trimmed first
 // candidate text — or null when the call fails or the response is empty.
 // Callers own their fallback copy and caching.
-const GEMINI_TIMEOUT = 8_000
-const GEMINI_VISION_TIMEOUT = 25_000
+export const GEMINI_TIMEOUT = 8_000
+export const GEMINI_VISION_TIMEOUT = 25_000
 
 async function fetchGemini(body: unknown, timeoutMs = GEMINI_TIMEOUT): Promise<{ text: string | null }> {
   const ctrl = new AbortController()
