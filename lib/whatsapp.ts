@@ -101,7 +101,7 @@ export async function sendLocationRequest(to: string, body: string) {
     type: 'interactive',
     interactive: {
       type: 'location_request_message',
-      body: { text: cleanBody, type: 'text' },
+      body: { text: cleanBody },
       action: { name: 'send_location' },
     },
   })
@@ -176,6 +176,15 @@ export async function sendReaction(to: string, messageId: string, emoji: string)
 function clip(text: string, max: number): string {
   const t = (text || '').trim()
   return t.length <= max ? t : t.slice(0, max - 1) + '…'
+}
+
+// Meta rejects an interactive message whose body is blank ("The parameter
+// interactive.body.text is required"), so every body goes through this: an
+// empty string becomes a neutral prompt instead of a failed send that the
+// customer never sees.
+const FALLBACK_BODY = 'Choose an option below.'
+function bodyText(text: string, fallback = FALLBACK_BODY): string {
+  return clip(text, 1024) || fallback
 }
 
 export interface InteractiveRow {
@@ -285,13 +294,13 @@ export async function sendInteractiveList(
     to,
     'list',
     {
-      body: { text: clip(body, 1024) },
+      body: { text: bodyText(body) },
       action: {
         button: clip(buttonLabel, 20),
         sections: [{ title: clip('Options', 24) as string, rows: safeRows }],
       },
     },
-    clip(body, 1024),
+    bodyText(body),
     `${safeRows.length} rows: ${safeRows.map(r => `${r.id}: ${r.title}${r.description ? ` (${r.description})` : ''}`).join(' | ')}`,
     replyTo
   )
@@ -318,10 +327,10 @@ export async function sendInteractiveButtons(
     to,
     'button',
     {
-      body: { text: clip(body, 1024) },
+      body: { text: bodyText(body) },
       action: { buttons: safeButtons },
     },
-    clip(body, 1024),
+    bodyText(body),
     safeButtons.map(b => b.reply.id).join(','),
     replyTo
   )
@@ -348,7 +357,7 @@ export async function sendInteractiveImageCard(
     return
   }
 
-  const cleanBody = clip(body, 1024)
+  const cleanBody = bodyText(body)
   const card = {
     type: 'button' as const,
     ...(imageUrl ? { header: { type: 'image' as const, image: { link: imageUrl } } } : {}),
