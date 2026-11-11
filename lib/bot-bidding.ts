@@ -14,12 +14,76 @@ import { zimbabweCities } from '../data/zimbabwe-locations.js'
 // - Nationwide tier (is_remote, city='') any time: $0.50 × towns with no active local #1.
 // - Takeover of a town's #1 (is_remote, city set): only where a LOCAL currently
 //   holds it, at a 2× premium of the local's fee. Locals can always reclaim.
+//
+// One WhatsApp number can own several listings, so every lookup returns ALL of
+// the sender's businesses and the interactive flow asks which one is bidding.
+// The chosen listing rides along inside the callback ids:
+//   bid_biz_<rowId>
+//   bid_cat_<rowId>__<category>
+//   bid_nationwide_<rowId>__<category>
+//   bid_city_<rowId>__<category>__<city>
+//   bid_amt_<amount>__<rowId>__<category>__<city>
+// Ids without the rowId (sent before this existed) still resolve by phone.
 export const MIN_BID_GAP = 0.5
 export const LOCAL_BID_BASE = 0.5
 export const NATIONWIDE_TOWN_FEE = 0.5
 export const TAKEOVER_PREMIUM = 2
 
 type SupabaseClient = ReturnType<typeof getSupabase>
+
+export type BidBusiness = {
+  id: string
+  name: string
+  business_id: string | null
+  category: string[] | null
+  city: string | null
+  is_remote: boolean | null
+}
+
+const BID_BUSINESS_FIELDS = 'id, name, business_id, category, city, is_remote'
+
+/** The sender's number as stored, plus the usual variants (+263…, 0…). */
+function phoneVariants(phone: string): string[] {
+  const digits = digitsOnly(phone)
+  const out = new Set<string>()
+  if (phone) out.add(phone)
+  if (digits) {
+    out.add(digits)
+    out.add(`+${digits}`)
+    if (digits.startsWith('263')) out.add(`0${digits.slice(3)}`)
+  }
+  return [...out]
+}
+
+/**
+ * Every listing owned by this WhatsApp number (a number can own several).
+ * Ordered oldest-first so the first listing is the owner's original one.
+ */
+export async function loadMyBusinesses(phone: string): Promise<BidBusiness[]> {
+  const supabase = getSupabase()
+  const { data, error } = await supabase
+    .from('businesses')
+    .select(BID_BUSINESS_FIELDS)
+    .in('phone', phoneVariants(phone))
+    .order('created_at', { ascending: true })
+  if (error) {
+    console.error('[bidding] my businesses query failed:', error.message)
+    return []
+  }
+  return (data || []) as unknown as BidBusiness[]
+}
+
+/**
+ * Resolve the listing a callback is about. `rowId` comes from the id and is
+ * only accepted when it belongs to the sender; without it we fall back to the
+ * sender's first listing (old ids and one-listing owners).
+ */
+async function resolveSenderBusiness(phone: string, rowId?: string): Promise<BidBusiness | null> {
+  const mine = await loadMyBusinesses(phone)
+  if (!mine.length) return null
+  if (rowId) return mine.find((b) => b.id === rowId) || null
+  return mine[0]
+}
 
 /** Towns (static dataset) where this category has NO active #1 spot. */
 export async function unoccupiedTownCount(supabase: SupabaseClient, category: string): Promise<number> {
@@ -133,59 +197,18 @@ export async function resolveBidScope(
   }
 }
 
-/**
- * Handle the main `bid` command.
- * Usage: `bid` or `bid <category> <city|nationwide> <amount>`
- */
-export async function handleBidCommand(phone: string, text: string) {
-  const supabase = getSupabase()
-
-  // Find business by owner's phone
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, business_id, category, city, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
-
-  if (!business) {
-    await sendWhatsAppMessage(phone, 'No business found for this WhatsApp number. Register first with `register`.')
-    return
-  }
-
+/** Category picker for one listing. */
+async function showBidCategories(phone: string, business: BidBusiness) {
   const categories = business.category || []
   if (categories.length === 0) {
     await sendWhatsAppMessage(phone, 'Your listing has no categories. Add categories via the portal to bid.')
     return
   }
 
-  // Parse arguments: bid <category> <city> <amount>
-  const parts = text.trim().split(/\s+/)
-  if (parts.length >= 4) {
-    // Quick bid: bid plumber harare 1.50 (or "nationwide" for the nationwide slot)
-    const category = parts[1]
-    let city = parts[2]
-    const amount = parseFloat(parts[3])
-    if (city.toLowerCase() === 'nationwide') city = ''
-
-    if (!categories.includes(category)) {
-      await sendWhatsAppMessage(phone, `Category "${category}" not found on your listing. Your categories: ${categories.join(', ')}`)
-      return
-    }
-
-    if (!business.is_remote && city !== business.city) {
-      await sendWhatsAppMessage(phone, `You can only bid in your listing's city (${business.city}).`)
-      return
-    }
-
-    await handleBidAmount(phone, business.id, category, city || '', amount)
-    return
-  }
-
-  // Interactive flow: show categories to pick from
-  const rows = categories.map((c: string) => ({
-    id: `bid_cat_${c}`,
+  const rows = categories.slice(0, 10).map((c: string) => ({
+    id: `bid_cat_${business.id}__${c}`,
     title: c,
-    description: business.is_remote ? 'Nationwide — pick city next' : business.city || 'N/A'
+    description: business.is_remote ? 'Nationwide — pick city next' : business.city || 'N/A',
   }))
 
   await sendInteractiveList(
@@ -197,20 +220,101 @@ export async function handleBidCommand(phone: string, text: string) {
 }
 
 /**
+ * Handle the main `bid` command.
+ * Usage: `bid` or `bid <category> <city|nationwide> <amount>`
+ */
+export async function handleBidCommand(phone: string, text: string) {
+  const mine = await loadMyBusinesses(phone)
+
+  if (mine.length === 0) {
+    await sendWhatsAppMessage(phone, 'No business found for this WhatsApp number. Register first with `register`.')
+    return
+  }
+
+  // Parse arguments: bid <category> <city> <amount>
+  const parts = text.trim().split(/\s+/)
+  if (parts.length >= 4) {
+    // Quick bid: bid plumber harare 1.50 (or "nationwide" for the nationwide slot)
+    const category = parts[1]
+    const wantsNationwide = parts[2].toLowerCase() === 'nationwide'
+    const quotedCity = wantsNationwide ? '' : parts[2]
+    const amount = parseFloat(parts[3])
+
+    const eligible = mine.filter((b) => (b.category || []).includes(category))
+    if (!eligible.length) {
+      const allCats = [...new Set(mine.flatMap((b) => b.category || []))]
+      await sendWhatsAppMessage(
+        phone,
+        `Category "${category}" not found on your listings. Your categories: ${allCats.join(', ')}`
+      )
+      return
+    }
+
+    // Prefer the listing that sits in the quoted town; otherwise the first match.
+    const business =
+      eligible.find((b) =>
+        b.is_remote ? quotedCity === '' : (b.city || '').toLowerCase() === quotedCity.toLowerCase()
+      ) || eligible[0]
+
+    const city = business.is_remote ? quotedCity : business.city || ''
+    if (!business.is_remote && quotedCity && quotedCity.toLowerCase() !== (business.city || '').toLowerCase()) {
+      await sendWhatsAppMessage(phone, `You can only bid in your listing's city (${business.city}).`)
+      return
+    }
+
+    await handleBidAmount(phone, business.id, category, city, amount)
+    return
+  }
+
+  // One listing: straight to its categories. Several: ask which listing first.
+  if (mine.length === 1) {
+    await showBidCategories(phone, mine[0])
+    return
+  }
+
+  const rows = mine.slice(0, 10).map((b) => ({
+    id: `bid_biz_${b.id}`,
+    title: (b.name || 'Listing').slice(0, 24),
+    description: `${b.business_id || ''} · ${b.is_remote ? 'Nationwide' : b.city || 'No town'}`.slice(0, 72),
+  }))
+
+  await sendInteractiveList(
+    phone,
+    `*Bid for #1 Spot* 🏆\nThis number has ${mine.length} listings. Which one are you bidding for?`,
+    rows,
+    'Choose business'
+  )
+}
+
+/**
+ * Handle business selection when the number owns several listings.
+ * Callback ID format: bid_biz_<rowId>
+ */
+export async function handleBidBusinessSelection(phone: string, selectionId: string) {
+  const rowId = selectionId.replace('bid_biz_', '')
+  const business = await resolveSenderBusiness(phone, rowId)
+
+  if (!business) {
+    await sendWhatsAppMessage(phone, 'That listing is not on this WhatsApp number. Type `bid` to start again.')
+    return
+  }
+
+  await showBidCategories(phone, business)
+}
+
+/**
  * Handle category selection from interactive list.
- * Callback ID format: bid_cat_<category>
+ * Callback ID format: bid_cat_<rowId>__<category> (legacy: bid_cat_<category>)
  */
 export async function handleBidCategorySelection(phone: string, selectionId: string) {
   const supabase = getSupabase()
 
-  const category = selectionId.replace('bid_cat_', '')
+  const rest = selectionId.replace('bid_cat_', '')
+  const sep = rest.indexOf('__')
+  const rowId = sep >= 0 ? rest.slice(0, sep) : ''
+  const category = sep >= 0 ? rest.slice(sep + 2) : rest
 
-  // Find business by owner's phone
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, business_id, category, city, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
+  const business = await resolveSenderBusiness(phone, rowId || undefined)
 
   if (!business) {
     await sendWhatsAppMessage(phone, 'No business found for this WhatsApp number.')
@@ -231,14 +335,14 @@ export async function handleBidCategorySelection(phone: string, selectionId: str
     const rows: { id: string; title: string; description: string }[] = []
     if (unoccupied > 0) {
       rows.push({
-        id: `bid_nationwide_${category}`,
+        id: `bid_nationwide_${business.id}__${category}`,
         title: '🌍 Nationwide',
         description: `$${nationwideFee.toFixed(2)} = $0.50 × ${unoccupied} open towns`,
       })
     }
     for (const s of held.slice(0, 8)) {
       rows.push({
-        id: `bid_city_${category}_${s.city}`,
+        id: `bid_city_${business.id}__${category}__${s.city}`,
         title: s.city,
         description: `Take over — 2× their $${Number(s.monthly_fee || 0).toFixed(2)}`,
       })
@@ -269,20 +373,28 @@ export async function handleBidCategorySelection(phone: string, selectionId: str
 
 /**
  * Handle town selection for nationwide businesses (takeover of a local-held #1).
- * Callback ID format: bid_city_<category>_<city>
+ * Callback ID format: bid_city_<rowId>__<category>__<city>
  */
 export async function handleBidCitySelection(phone: string, selectionId: string) {
   const supabase = getSupabase()
 
-  const parts = selectionId.replace('bid_city_', '').split('_')
-  const category = parts[0]
-  const city = parts.slice(1).join(' ')
+  const rest = selectionId.replace('bid_city_', '')
+  let rowId = ''
+  let category = ''
+  let city = ''
+  if (rest.includes('__')) {
+    const bits = rest.split('__')
+    rowId = bits[0]
+    category = bits[1] || ''
+    city = bits.slice(2).join('__')
+  } else {
+    // Legacy id: bid_city_<category>_<city>
+    const bits = rest.split('_')
+    category = bits[0]
+    city = bits.slice(1).join(' ')
+  }
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
+  const business = await resolveSenderBusiness(phone, rowId || undefined)
 
   if (!business) {
     await sendWhatsAppMessage(phone, 'Business not found.')
@@ -301,18 +413,17 @@ export async function handleBidCitySelection(phone: string, selectionId: string)
 
 /**
  * Handle the nationwide-slot selection for nationwide businesses.
- * Callback ID format: bid_nationwide_<category>
+ * Callback ID format: bid_nationwide_<rowId>__<category>
  */
 export async function handleBidNationwideSelection(phone: string, selectionId: string) {
   const supabase = getSupabase()
 
-  const category = selectionId.replace('bid_nationwide_', '')
+  const rest = selectionId.replace('bid_nationwide_', '')
+  const sep = rest.indexOf('__')
+  const rowId = sep >= 0 ? rest.slice(0, sep) : ''
+  const category = sep >= 0 ? rest.slice(sep + 2) : rest
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
+  const business = await resolveSenderBusiness(phone, rowId || undefined)
 
   if (!business) {
     await sendWhatsAppMessage(phone, 'Business not found.')
@@ -330,15 +441,31 @@ export async function handleBidNationwideSelection(phone: string, selectionId: s
 
 /**
  * Amount-button callback ids carry the full bid scope so a tap is
- * self-contained: bid_amt_<amount>__<category>__<city> (empty city =
- * nationwide). Returns null for ids without the scope suffix.
+ * self-contained: bid_amt_<amount>__<rowId>__<category>__<city> (empty city =
+ * nationwide). Older ids without the rowId still parse (businessId '').
  */
-export function parseBidAmountId(id: string): { amount: number; category: string; city: string } | null {
-  const m = id.match(/^bid_amt_([\d.]+)__([\s\S]+?)__([\s\S]*)$/)
+export function parseBidAmountId(
+  id: string
+): { amount: number; businessId: string; category: string; city: string } | null {
+  const m = id.match(/^bid_amt_([\d.]+)__(.*)$/)
   if (!m) return null
   const amount = parseFloat(m[1])
   if (isNaN(amount)) return null
-  return { amount, category: m[2].trim(), city: m[3].replace(/_/g, ' ').trim() }
+  const bits = m[2].split('__')
+  if (bits.length >= 3) {
+    return {
+      amount,
+      businessId: bits[0].trim(),
+      category: (bits[1] || '').trim(),
+      city: bits.slice(2).join('__').replace(/_/g, ' ').trim(),
+    }
+  }
+  return {
+    amount,
+    businessId: '',
+    category: (bits[0] || '').trim(),
+    city: (bits[1] || '').replace(/_/g, ' ').trim(),
+  }
 }
 
 /**
@@ -395,7 +522,7 @@ async function showBidAmountOptions(
   // last in the list but must still survive the cut, hence only two amounts.
   // The id carries the scope so the tap needs no stored conversation state.
   const amounts = [minBid, Math.round((minBid + 0.5) * 100) / 100]
-  const scopeSuffix = `__${category}__${city}`
+  const scopeSuffix = `__${businessId}__${category}__${city}`
 
   const buttons = amounts.map(a => ({
     id: `bid_amt_${a.toFixed(2)}${scopeSuffix}`,
@@ -477,6 +604,7 @@ export async function handleBidAmount(phone: string, businessId: string, categor
 /**
  * Handle bid confirmation with phone number.
  * Expected format: "confirm <amount> <phone> [<category> [in <city> | nationwide]]"
+ * The listing is chosen by category when the number owns several.
  */
 export async function handleBidConfirm(phone: string, text: string) {
   const supabase = getSupabase()
@@ -502,23 +630,19 @@ export async function handleBidConfirm(phone: string, text: string) {
     return
   }
 
-  // Find business by owner's phone
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, business_id, category, city, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
+  const mine = await loadMyBusinesses(phone)
 
-  if (!business) {
+  if (mine.length === 0) {
     await sendWhatsAppMessage(phone, 'Business not found.')
     return
   }
 
   // Parse the optional scope tokens: "<category> [in <city> | nationwide]".
-  // Falls back to the listing's own scope when omitted.
+  // Falls back to the listing's own scope when omitted (single-listing owners).
   const rest = parts.slice(3).join(' ').trim()
-  let category = business.category?.[0] || ''
-  let city = business.is_remote ? '' : business.city || ''
+  const first = mine[0]
+  let category = mine.length === 1 ? first.category?.[0] || '' : ''
+  let city = first.is_remote ? '' : first.city || ''
 
   if (rest) {
     if (/\bnationwide\b/i.test(rest)) {
@@ -532,23 +656,37 @@ export async function handleBidConfirm(phone: string, text: string) {
         city = inMatch[2].trim()
       } else {
         category = rest
-        if (!business.is_remote) city = business.city || ''
+        if (!first.is_remote) city = first.city || ''
       }
     }
   }
 
   if (!category) {
-    await sendWhatsAppMessage(phone, 'No categories on your listing.')
+    await sendWhatsAppMessage(
+      phone,
+      mine.length > 1
+        ? 'Your number has several listings. Include the category: `confirm <amount> <phone> <category> [in <city> | nationwide]`'
+        : 'No categories on your listing.'
+    )
     return
   }
+
+  // Pick the listing that actually carries this category.
+  const business = mine.find((b) => (b.category || []).includes(category)) || first
+
   if (!business.category?.includes(category)) {
-    await sendWhatsAppMessage(phone, `Category "${category}" not found on your listing. Your categories: ${(business.category || []).join(', ')}`)
+    const names = mine.map((b) => b.name).join(', ')
+    await sendWhatsAppMessage(
+      phone,
+      `Category "${category}" not found on your listing. Your categories: ${(business.category || []).join(', ')}${mine.length > 1 ? ` (listings: ${names})` : ''}`
+    )
     return
   }
-  if (!business.is_remote && city && city !== business.city) {
+  if (!business.is_remote && city && city.toLowerCase() !== (business.city || '').toLowerCase()) {
     await sendWhatsAppMessage(phone, `You can only bid in your listing's city (${business.city}).`)
     return
   }
+  if (!business.is_remote) city = business.city || ''
 
   // Server-side pricing guard (same rules as the portal API)
   const scope = await resolveBidScope(supabase, category, city || '', business.is_remote === true)
@@ -643,39 +781,43 @@ export async function handleBidConfirm(phone: string, text: string) {
 }
 
 /**
- * Handle "my bids" command - show user's active/pending bids.
+ * Handle "my bids" command - show bids across all of the sender's listings.
  */
 export async function handleMyBidsCommand(phone: string) {
   const supabase = getSupabase()
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, business_id')
-    .eq('phone', phone)
-    .maybeSingle()
+  const mine = await loadMyBusinesses(phone)
 
-  if (!business) {
+  if (mine.length === 0) {
     await sendWhatsAppMessage(phone, 'No business found for this WhatsApp number.')
     return
   }
 
+  const names = new Map(mine.map((b) => [b.id, b.name] as const))
+
   // Show all bids (no period filter)
   const { data: bids } = await supabase
     .from('bids')
-    .select('id, category, city, amount, status, paynow_paid_at, created_at')
-    .eq('business_id', business.id)
+    .select('id, business_id, category, city, amount, status, paynow_paid_at, created_at')
+    .in('business_id', mine.map((b) => b.id))
     .order('created_at', { ascending: false })
 
+  const header =
+    mine.length === 1
+      ? `Business: *${mine[0].name}* (${mine[0].business_id})`
+      : `Listings: ${mine.map((b) => `*${b.name}*`).join(', ')}`
+
   if (!bids || bids.length === 0) {
-    await sendWhatsAppMessage(phone, `*Your Bids*\nBusiness: *${business.name}* (${business.business_id})\n\nNo bids yet. Type \`bid\` to start.`)
+    await sendWhatsAppMessage(phone, `*Your Bids*\n${header}\n\nNo bids yet. Type \`bid\` to start.`)
     return
   }
 
-  let message = `*Your Bids*\nBusiness: *${business.name}* (${business.business_id})\n\n`
+  let message = `*Your Bids*\n${header}\n\n`
 
   for (const bid of bids) {
     const statusEmoji = bid.status === 'approved' ? '👑' : bid.status === 'paid' ? '✅' : bid.status === 'pending' ? '⏳' : bid.status === 'outbid' ? '❌' : '📋'
-    message += `${statusEmoji} *${bid.category}* ${bid.city ? `in ${bid.city}` : '(nationwide)'}\n`
+    const bizName = names.get(bid.business_id) || ''
+    message += `${statusEmoji} *${bid.category}* ${bid.city ? `in ${bid.city}` : '(nationwide)'}${mine.length > 1 && bizName ? ` — ${bizName}` : ''}\n`
     message += `  Bid: $${Number(bid.amount).toFixed(2)} (one-time) | Status: ${bid.status}\n`
     if (bid.paynow_paid_at) {
       message += `  Paid: ${fmtHarare(bid.paynow_paid_at, true)}\n`
@@ -689,67 +831,70 @@ export async function handleMyBidsCommand(phone: string) {
 }
 
 /**
- * Handle "outbid" command - show what's needed to beat current #1.
+ * Handle "outbid" command - show what's needed to beat current #1,
+ * for every listing the sender owns.
  */
 export async function handleOutbidCommand(phone: string) {
   const supabase = getSupabase()
 
-  const { data: business } = await supabase
-    .from('businesses')
-    .select('id, name, business_id, category, city, is_remote')
-    .eq('phone', phone)
-    .maybeSingle()
+  const mine = await loadMyBusinesses(phone)
 
-  if (!business) {
+  if (mine.length === 0) {
     await sendWhatsAppMessage(phone, 'No business found for this WhatsApp number.')
     return
   }
 
-  const categories = business.category || []
-  if (categories.length === 0) {
-    await sendWhatsAppMessage(phone, 'Your listing has no categories.')
-    return
-  }
+  let message = `*Outbid Requirements* 🎯\n`
+  let showedAny = false
 
-  let message = `*Outbid Requirements* 🎯\nBusiness: *${business.name}*\n\n`
+  for (const business of mine) {
+    const categories = business.category || []
+    if (categories.length === 0) continue
+    showedAny = true
 
-  if (business.is_remote) {
-    for (const cat of categories) {
-      const scope = await resolveBidScope(supabase, cat, '', true)
-      if (scope.ok) {
-        message += `*${cat}* (nationwide)\n`
-        message += `Nationwide slot: *$${scope.min.toFixed(2)}* = $${NATIONWIDE_TOWN_FEE.toFixed(2)} × ${scope.towns} open towns\n`
-        const held = await localHeldSpots(supabase, cat)
-        if (held.length > 0) {
-          message += `Takeovers available: ${held.slice(0, 4).map((s: { city: string; monthly_fee: number }) => `${s.city} (2× $${Number(s.monthly_fee).toFixed(2)})`).join(', ')}${held.length > 4 ? '…' : ''}\n`
+    message += `\n*${business.name}* (${business.business_id})\n`
+
+    if (business.is_remote) {
+      for (const cat of categories) {
+        const scope = await resolveBidScope(supabase, cat, '', true)
+        if (scope.ok) {
+          message += `*${cat}* (nationwide)\n`
+          message += `Nationwide slot: *$${scope.min.toFixed(2)}* = $${NATIONWIDE_TOWN_FEE.toFixed(2)} × ${scope.towns} open towns\n`
+          const held = await localHeldSpots(supabase, cat)
+          if (held.length > 0) {
+            message += `Takeovers available: ${held.slice(0, 4).map((s: { city: string; monthly_fee: number }) => `${s.city} (2× $${Number(s.monthly_fee).toFixed(2)})`).join(', ')}${held.length > 4 ? '…' : ''}\n`
+          }
+          message += '\n'
+        } else {
+          message += `*${cat}* (nationwide)\nNationwide slot closed — locals hold every town. Type \`bid\` to see takeover prices.\n\n`
         }
-        message += '\n'
+      }
+      continue
+    }
+
+    for (const cat of categories) {
+      const city = business.city || 'N/A'
+
+      const scope = await resolveBidScope(supabase, cat, business.city || '', false)
+
+      if (scope.ok) {
+        message += `*${cat}* in ${city}\n`
+        message += `Current #1: ${scope.mode === 'outbid' ? (scope.holderId === business.id ? 'YOU 👑' : 'Another business') : '*OPEN* 🟢'}\n`
+        if (scope.mode === 'outbid') {
+          message += `Current fee paid: $${scope.currentFee.toFixed(2)} (one-time)\n`
+          message += `To take/keep #1: bid at least *$${scope.min.toFixed(2)}* (fee + $${MIN_BID_GAP.toFixed(2)})\n\n`
+        } else {
+          message += `Min bid: *$${scope.min.toFixed(2)}* (one-time)\n\n`
+        }
       } else {
-        message += `*${cat}* (nationwide)\nNationwide slot closed — locals hold every town. Type \`bid\` to see takeover prices.\n\n`
+        message += `*${cat}* in ${city}\n${scope.reason}\n\n`
       }
     }
-    message += 'Type `bid` for the interactive flow.'
-    await sendWhatsAppMessage(phone, message)
-    return
   }
 
-  for (const cat of categories) {
-    const city = business.city || 'N/A'
-
-    const scope = await resolveBidScope(supabase, cat, business.city || '', false)
-
-    if (scope.ok) {
-      message += `*${cat}* in ${city}\n`
-      message += `Current #1: ${scope.mode === 'outbid' ? (scope.holderId === business.id ? 'YOU 👑' : 'Another business') : '*OPEN* 🟢'}\n`
-      if (scope.mode === 'outbid') {
-        message += `Current fee paid: $${scope.currentFee.toFixed(2)} (one-time)\n`
-        message += `To take/keep #1: bid at least *$${scope.min.toFixed(2)}* (fee + $${MIN_BID_GAP.toFixed(2)})\n\n`
-      } else {
-        message += `Min bid: *$${scope.min.toFixed(2)}* (one-time)\n\n`
-      }
-    } else {
-      message += `*${cat}* in ${city}\n${scope.reason}\n\n`
-    }
+  if (!showedAny) {
+    await sendWhatsAppMessage(phone, 'Your listings have no categories. Add categories via the portal to bid.')
+    return
   }
 
   message += 'Type `bid <category> <city> <amount>` for a quick bid, or `bid` for interactive.'
