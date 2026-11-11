@@ -252,7 +252,10 @@ export interface VerifyGroup {
 
 /** Verify screen of the typed order: everything matched, grouped per shop,
  * with a grand total when every line carries a price. */
-export function renderOrderVerify(groups: VerifyGroup[]): string {
+export function renderOrderVerify(
+  groups: VerifyGroup[],
+  footer = 'Tap ✅ to send now, or ✎ to re-type it.'
+): string {
   const out: string[] = []
   let total = 0
   let priced = 0
@@ -278,7 +281,7 @@ export function renderOrderVerify(groups: VerifyGroup[]): string {
   if (priced && priced === groups.reduce((s, g) => s + g.lines.length, 0)) {
     bits.push('', `*Total: ${monoUSD(total).replace(/`/g, '')}*`)
   }
-  bits.push('', 'Tap ✅ to send now, or ✎ to re-type it.')
+  bits.push('', footer)
   return bits.join('\n')
 }
 
