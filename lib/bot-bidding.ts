@@ -387,16 +387,14 @@ async function showBidAmountOptions(
     message += `Minimum bid: *$${minBid.toFixed(2)}* (one-time)\n`
   }
 
-  message += `Select an amount or type a custom amount:`
+  message += `Pick an amount, or tap *Custom…* to name your own:`
 
-  // Quick amount buttons (minBid, minBid+0.50, minBid+1.00, minBid+2.00).
+  // Quick amount buttons (minBid, minBid+0.50) plus Custom.
+  // WhatsApp allows at most THREE reply buttons and sendInteractiveButtons
+  // silently drops the rest, so the set must never exceed three — Custom stays
+  // last in the list but must still survive the cut, hence only two amounts.
   // The id carries the scope so the tap needs no stored conversation state.
-  const amounts = [
-    minBid,
-    Math.round((minBid + 0.5) * 100) / 100,
-    Math.round((minBid + 1.0) * 100) / 100,
-    Math.round((minBid + 2.0) * 100) / 100,
-  ]
+  const amounts = [minBid, Math.round((minBid + 0.5) * 100) / 100]
   const scopeSuffix = `__${category}__${city}`
 
   const buttons = amounts.map(a => ({
