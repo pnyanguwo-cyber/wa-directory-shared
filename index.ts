@@ -53,6 +53,7 @@ export * from './lib/listing-activation'
 export * from './lib/pay-lookup'
 export * from './lib/trial-helpers'
 export * from './lib/onboarding-log'
+export * from './lib/bot-bidding'
 
 // Bot-specific AI functions (from main repo)
 export { callGemini, callGeminiParts, classifyIntent, expandSearchQuery, expandSearchQueryControlled } from './lib/gemini-bot.js'

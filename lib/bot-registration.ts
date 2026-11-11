@@ -203,7 +203,7 @@ const OPTIONAL_FIELDS: { key: 'website' | 'address' | 'password'; label: string;
   {
     key: 'password',
     label: 'Portal password',
-    prompt: `Create a password for your business portal (at least 8 characters, with letters and numbers) so you can log in and edit your listing anytime. Tap Skip to set it up later.`,
+    prompt: `Create a password for your business portal (at least 8 characters, with letters and numbers) so you can log in and edit your listing anytime. Skip is fine — you can set it later online at the link we send (loads a web page, so it uses mobile data).`,
   },
 ]
 
@@ -392,39 +392,38 @@ export async function handleRegistrationMessage(phone: string, text: string, con
     if (lower === 'edit' || lower === REGISTRATION_BUTTONS.edit) {
       await sendWhatsAppMessage(
         phone,
-        `✏️ To change a detail, reply with:\n\`edit Field: New Value\`\n\nExample: \`edit City: Bulawayo\`\n\nThen type *proceed*.`
+        `✏️ To change a detail, just type it:\n\`City: Bulawayo\`\n\n(The \`edit City: Bulawayo\` style works too.)\n\nThen type *proceed*.`
       )
       return
     }
-    if (lower.startsWith('edit ')) {
-      const parts = text.slice(5).split(':')
-      if (parts.length >= 2) {
-        const fieldName = parts[0].trim().toLowerCase()
-        const fieldValue = parts.slice(1).join(':').trim()
-        const fields = context.fields || {}
+    // Accept both "edit City: Bulawayo" and the plain "City: Bulawayo".
+    const editMatch = text.match(/^(?:edit\s+)?([A-Za-z][A-Za-z ]{2,20}?)\s*:\s*([\s\S]+)$/i)
+    if (editMatch) {
+      const fieldName = editMatch[1].trim().toLowerCase()
+      const fieldValue = editMatch[2].trim()
+      const fields = context.fields || {}
 
-        let key: RequiredField | 'website' | 'address' | 'area' | '' = ''
-        if (fieldName.includes('name')) key = 'business_name'
-        else if (fieldName.includes('category')) key = 'category'
-        else if (fieldName.includes('city')) key = 'city'
-        else if (fieldName.includes('phone') || fieldName.includes('whatsapp')) key = 'phone'
-        else if (fieldName.includes('description') || fieldName.includes('offer')) key = 'description'
-        else if (fieldName.includes('website')) key = 'website'
-        else if (fieldName.includes('address')) key = 'address'
-        else if (fieldName.includes('area')) key = 'area'
+      let key: RequiredField | 'website' | 'address' | 'area' | '' = ''
+      if (fieldName.includes('name')) key = 'business_name'
+      else if (fieldName.includes('category')) key = 'category'
+      else if (fieldName.includes('city')) key = 'city'
+      else if (fieldName.includes('phone') || fieldName.includes('whatsapp')) key = 'phone'
+      else if (fieldName.includes('description') || fieldName.includes('offer')) key = 'description'
+      else if (fieldName.includes('website')) key = 'website'
+      else if (fieldName.includes('address')) key = 'address'
+      else if (fieldName.includes('area')) key = 'area'
 
-        if (key) {
-          setFieldValue(fields, key, fieldValue)
-          await updateConversationContext(phone, { fields })
-          await sendWhatsAppMessage(phone, `✅ Updated *${FIELD_LABELS[key as RequiredField] || key}* to: ${fieldValue}\n\nType *proceed* when ready, or keep editing with \`edit Field: New Value\`.`)
-          return
-        }
+      if (key) {
+        setFieldValue(fields, key, fieldValue)
+        await updateConversationContext(phone, { fields })
+        await sendWhatsAppMessage(phone, `✅ Updated *${FIELD_LABELS[key as RequiredField] || key}* to: ${fieldValue}\n\nType *proceed* when ready, or keep editing (e.g. \`City: Bulawayo\`).`)
+        return
       }
     }
 
     await sendWhatsAppMessage(
       phone,
-      `Type *proceed* to review your listing, or edit a field with \`edit Field: New Value\`.`
+      `Type *proceed* to review your listing, or change a detail by typing it (e.g. \`City: Bulawayo\`).`
     )
     return
   }
@@ -438,54 +437,53 @@ export async function handleRegistrationMessage(phone: string, text: string, con
     if (lower === 'edit' || lower === REGISTRATION_BUTTONS.edit) {
       await sendWhatsAppMessage(
         phone,
-        `✏️ To change a detail, reply with:\n\`edit Field: New Value\`\n\nExample: \`edit City: Bulawayo\`\n\nThen tap or type *publish*.`
+        `✏️ To change a detail, just type it:\n\`City: Bulawayo\`\n\n(The \`edit City: Bulawayo\` style works too.)\n\nThen tap or type *publish*.`
       )
       return
     }
-    if (lower.startsWith('edit ')) {
-      const parts = text.slice(5).split(':')
-      if (parts.length >= 2) {
-        const fieldName = parts[0].trim().toLowerCase()
-        const fieldValue = parts.slice(1).join(':').trim()
-        const listing = context.listing || {}
+    // Accept both "edit City: Bulawayo" and the plain "City: Bulawayo".
+    const editMatch = text.match(/^(?:edit\s+)?([A-Za-z][A-Za-z ]{2,20}?)\s*:\s*([\s\S]+)$/i)
+    if (editMatch) {
+      const fieldName = editMatch[1].trim().toLowerCase()
+      const fieldValue = editMatch[2].trim()
+      const listing = context.listing || {}
 
-        let key = ''
-        if (fieldName.includes('name')) key = 'name'
-        else if (fieldName.includes('category')) key = 'categories'
-        else if (fieldName.includes('city')) key = 'city'
-        else if (fieldName.includes('phone')) key = 'phone'
-        else if (fieldName.includes('description') || fieldName.includes('bio')) key = 'description'
-        else if (fieldName.includes('website')) key = 'website'
-        else if (fieldName.includes('address')) key = 'address'
-        else if (fieldName.includes('price')) key = 'priceRange'
-
-        if (key) {
-          if (key === 'categories') listing[key] = [fieldValue]
-          else listing[key] = fieldValue
-          await updateConversationContext(phone, { listing })
-          const fresh = await getConversationState(phone)
-          await showFinalReview(phone, { ...(fresh?.context || context), listing })
+      if (fieldName.includes('password')) {
+        const validation = validatePassword(fieldValue)
+        if (!validation.ok) {
+          await sendWhatsAppMessage(
+            phone,
+            `❌ ${validation.reason}\n\nTry again: \`Password: YourChoice123\``
+          )
           return
         }
+        await updateConversationContext(phone, { password: fieldValue })
+        const fresh = await getConversationState(phone)
+        await showFinalReview(phone, { ...(fresh?.context || context), listing, password: fieldValue })
+        return
+      }
 
-        if (fieldName.includes('password')) {
-          const validation = validatePassword(fieldValue)
-          if (!validation.ok) {
-            await sendWhatsAppMessage(
-              phone,
-              `❌ ${validation.reason}\n\nTry again: \`edit Password: YourChoice123\``
-            )
-            return
-          }
-          await updateConversationContext(phone, { password: fieldValue })
-          const fresh = await getConversationState(phone)
-          await showFinalReview(phone, { ...(fresh?.context || context), listing, password: fieldValue })
-          return
-        }
+      let key = ''
+      if (fieldName.includes('name')) key = 'name'
+      else if (fieldName.includes('category')) key = 'categories'
+      else if (fieldName.includes('city')) key = 'city'
+      else if (fieldName.includes('phone')) key = 'phone'
+      else if (fieldName.includes('description') || fieldName.includes('bio')) key = 'description'
+      else if (fieldName.includes('website')) key = 'website'
+      else if (fieldName.includes('address')) key = 'address'
+      else if (fieldName.includes('price')) key = 'priceRange'
+
+      if (key) {
+        if (key === 'categories') listing[key] = [fieldValue]
+        else listing[key] = fieldValue
+        await updateConversationContext(phone, { listing })
+        const fresh = await getConversationState(phone)
+        await showFinalReview(phone, { ...(fresh?.context || context), listing })
+        return
       }
     }
 
-    await sendWhatsAppMessage(phone, `Type *publish* to submit your listing, or \`edit Field: Value\` to make changes.`)
+    await sendWhatsAppMessage(phone, `Type *publish* to submit your listing, or change a detail by typing it (e.g. \`City: Bulawayo\`).`)
   }
 }
 
@@ -695,8 +693,7 @@ async function showFinalReview(phone: string, context: any) {
       `${address ? `✓ Address: ${address}\n` : ''}` +
       `${context.password ? '✓ Portal password: set\n' : ''}` +
       `\nActivation: ${context.approvedPlan === 'trial' ? TRIAL_PLAN_LABEL + ' (starts when an admin approves)' : `Paid — USD ${formatUsd(PLAN_CONFIG['1m'].price)}/month`}\n\n` +
-      `Reply \`edit Field: New Value\` to change a detail.\n` +
-      `Example: \`edit City: Bulawayo\`\n\n` +
+      `Reply \`City: Bulawayo\` to change a detail (or \`edit City: Bulawayo\`).\n` +
       `Tap *🚀 Publish listing* when ready.`,
     [
       { id: REGISTRATION_BUTTONS.publish, title: '🚀 Publish listing' },
@@ -785,8 +782,28 @@ async function submitRegistration(phone: string, context: any) {
     })
   }
 
+  // Ping the admin on WhatsApp for every new listing (the wizard publish path
+  // sends the same card) — with the verify commands ready to copy.
+  if (process.env.ADMIN_WHATSAPP) {
+    const cats = Array.isArray(result.categories) ? result.categories.join(', ') : ''
+    await sendWhatsAppMessage(
+      process.env.ADMIN_WHATSAPP,
+      [
+        '🆕 NEW BUSINESS PENDING VERIFICATION',
+        '',
+        `Name: ${result.name}`,
+        `ID: ${result.businessId}`,
+        `Category: ${cats || '—'}`,
+        `Location: ${result.city || 'Zimbabwe (whole country)'}`,
+        `Phone: ${listingData.phone || phone}`,
+        'Reply *pending* then *verify 1*, or *verify <name> 30*.',
+        `Approve: ${SITE_URL}/admin`,
+      ].join('\n')
+    ).catch(() => {})
+  }
+
   const fullPhone = toFullPhone('+263', listingData.phone || phone)
-  let portalLine = `🔐 Set your portal password anytime: ${SITE_URL}/account-setup?token=${result.editToken}`
+  let portalLine = `🔐 Your portal is where you edit your listing & website, get business card + QR code templates, and see your stats.\nSet your password online (opens a web page, uses data): ${SITE_URL}/account-setup?token=${result.editToken}`
 
   if (context.password) {
     try {
@@ -800,7 +817,7 @@ async function submitRegistration(phone: string, context: any) {
         }),
       })
       if (response.ok) {
-        portalLine = `✅ Portal account created — log in at ${SITE_URL}/login with your number and password.`
+        portalLine = `✅ Portal account created — log in at ${SITE_URL}/login with your number and password.\nInside: edit your listing & website, business card + QR code templates, stats.`
       } else {
         logOnboarding('portal_account_create_failed', {
           phone: maskPhone(phone),
