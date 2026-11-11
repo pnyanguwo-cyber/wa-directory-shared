@@ -307,7 +307,13 @@ export function renderOrderSent(
 
 /** Buyer-side "my orders" tracker. */
 export function renderMyOrders(
-  rows: { biz_name: string; status: string; token: string }[]
+  rows: {
+    biz_name: string
+    status: string
+    token: string
+    total?: number
+    counter?: 'pending' | 'accepted' | 'declined' | null
+  }[]
 ): string {
   const label: Record<string, string> = {
     open: '⏳ waiting for you to send',
@@ -315,11 +321,20 @@ export function renderMyOrders(
     claimed: '✅ shop confirmed!',
     closed: '⌛ expired (re-order anytime)',
   }
-  return [
-    '🧾 *Your orders*',
-    '',
-    ...rows.map(r => `· *${r.biz_name}*, ${label[r.status] || r.status}, wa.directory/go/o/${r.token}`),
-  ].join('\n')
+  const counterLabel: Record<string, string> = {
+    pending: '💰 new price waiting for your answer',
+    accepted: '💰 new price accepted',
+    declined: '💰 new price declined - original stands',
+  }
+  const out = rows.map(r => {
+    const line = `· *${r.biz_name}*, ${label[r.status] || r.status}, wa.directory/go/o/${r.token}`
+    const bits = [
+      r.total != null ? monoUSD(r.total).replace(/`/g, '') : '',
+      r.counter ? counterLabel[r.counter] : '',
+    ].filter(Boolean)
+    return bits.length ? `${line}\n   ↳ ${bits.join(' · ')}` : line
+  })
+  return ['🧾 *Your orders*', '', ...out].join('\n')
 }
 
 /** Empty results / no supply message. */
