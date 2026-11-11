@@ -587,6 +587,9 @@ export function renderFirstWelcome(name?: string, channelLink?: string): string 
   }
   lines.push(
     '',
+    '*Want your account deleted?*',
+    'Ask support - WhatsApp +263773791864 or wadirectory@proton.me. Tell us the number you registered with; a reason is optional. Deletion can take up to 7 days.',
+    '',
     'To register your business, post a need, order items or get help, open the menu below 👇'
   )
   return lines.join('\n')
@@ -814,6 +817,17 @@ export function FALLBACK_HELP_LINES(siteUrl: string, channelLink?: string): stri
     '📞 *CONTACT FOR HELP*',
     '+263773791864',
     'wadirectory@proton.me',
+    '',
+    '*🗑️ DELETE YOUR ACCOUNT*',
+    '',
+    'You can ask us to delete your account and its data at any time:',
+    '',
+    '• WhatsApp: +263773791864',
+    '• Email: wadirectory@proton.me',
+    '',
+    'Tell us the number you registered with. Giving a reason is optional - it only helps us improve customer care.',
+    '',
+    'Deletion can take up to 7 days. We will confirm on this chat when it is done.',
   ]
 
   return lines
@@ -880,6 +894,17 @@ export function SUPPLIER_HELP_LINES(siteUrl: string, channelLink?: string): stri
     '📞 *CONTACT FOR HELP*',
     '+263773791864',
     'wadirectory@proton.me',
+    '',
+    '*🗑️ DELETE YOUR ACCOUNT*',
+    '',
+    'You can ask us to delete your account and its data at any time:',
+    '',
+    '• WhatsApp: +263773791864',
+    '• Email: wadirectory@proton.me',
+    '',
+    'Tell us the number you registered with. Giving a reason is optional - it only helps us improve customer care.',
+    '',
+    'Deletion can take up to 7 days. We will confirm on this chat when it is done.',
   ]
 
   return lines
