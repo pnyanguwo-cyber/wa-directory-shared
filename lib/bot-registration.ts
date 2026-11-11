@@ -28,6 +28,8 @@ import {
 import { analyseBusinessMaterial, RegistrationFields } from './ai-registration.js'
 import { categories, matchCategory } from '../data/categories.js'
 import { createListing } from './listing-create.js'
+import { toFullPhone } from './phone.js'
+import { SITE_URL } from './site-url.js'
 import { requestTrial } from './trial-helpers.js'
 import { PLAN_CONFIG, TRIAL_PLAN_LABEL, formatUsd, type PlanType, type TrialStatus } from '../types/index.js'
 import { getSupabase } from './supabase-server.js'
@@ -54,6 +56,7 @@ export const REGISTRATION_BUTTONS = {
   edit: 'reg_edit',
   planTrial: 'reg_plan_trial',
   planPaid: 'reg_plan_paid',
+  publish: 'reg_publish',
 } as const
 
 function imageFirstMessage(planLabel: string) {
@@ -159,6 +162,8 @@ export async function startRegistrationFlow(phone: string, opts: { force?: boole
             (context.missing || [])[context.currentMissingIndex || 0] || 'business_name'
           )}\n\n(Type *cancel* at any time to abort)`
         )
+      } else if (state === 'REGISTRATION_COLLECTING_OPTIONAL') {
+        await askNextOptional(phone, context.optionalQueue || [], context.optionalIndex || 0)
       } else {
         await sendPlanChoice(phone)
       }
@@ -182,6 +187,138 @@ function startManualCollection(phone: string, context: any, opts: { collected?: 
     missing,
     currentMissingIndex: index,
   })
+}
+
+const OPTIONAL_FIELDS: { key: 'website' | 'address' | 'password'; label: string; prompt: string }[] = [
+  {
+    key: 'website',
+    label: 'Website',
+    prompt: `Share your website link (e.g. https://example.co.zw), or tap Skip — if you don't have one, we'll create a free site page for you.`,
+  },
+  {
+    key: 'address',
+    label: 'Physical address',
+    prompt: `What's your physical address (so customers can find you)? Tap Skip if you don't have a storefront.`,
+  },
+  {
+    key: 'password',
+    label: 'Portal password',
+    prompt: `Create a password for your business portal (at least 8 characters, with letters and numbers) so you can log in and edit your listing anytime. Tap Skip to set it up later.`,
+  },
+]
+
+function validatePassword(value: string): { ok: boolean; reason?: string } {
+  if (value.length < 8) return { ok: false, reason: 'That password is too short — it needs at least 8 characters.' }
+  if (!/[A-Za-z]/.test(value)) return { ok: false, reason: 'Your password needs at least one letter.' }
+  if (!/[0-9]/.test(value)) return { ok: false, reason: 'Your password needs at least one number.' }
+  return { ok: true }
+}
+
+function looksLikeWebsite(value: string): boolean {
+  const v = value.trim()
+  if (/^https?:\/\//i.test(v)) return true
+  return /^[^\s]+\.[^\s]+$/.test(v)
+}
+
+async function startOptionalCollection(phone: string, context: any) {
+  const fields = (context.fields || {}) as unknown as Record<string, { value?: string } | undefined>
+  const queue = OPTIONAL_FIELDS.filter(item => item.key === 'password' || !fields[item.key]?.value)
+
+  await setConversationState(phone, 'REGISTRATION_COLLECTING_OPTIONAL', {
+    ...context,
+    step: 'optional_fields',
+    optionalQueue: queue.map(item => item.key),
+    optionalIndex: 0,
+  })
+  await sendWhatsAppMessage(phone, `🎉 All required details captured. Just a few optional extras — skip any you don't need.`)
+  await askNextOptional(phone, queue.map(item => item.key), 0)
+}
+
+async function askNextOptional(phone: string, queue: string[], index: number) {
+  const key = queue[index]
+  if (!key) {
+    const state = await getConversationState(phone)
+    await showFinalReview(phone, state?.context || {})
+    return
+  }
+  const item = OPTIONAL_FIELDS.find(i => i.key === key)
+  if (!item) {
+    await askNextOptional(phone, queue, index + 1)
+    return
+  }
+  await sendInteractiveButtons(
+    phone,
+    `*Optional details (${index + 1}/${queue.length})*\n\n${item.prompt}`,
+    [{ id: REGISTRATION_BUTTONS.skip, title: 'Skip' }]
+  )
+}
+
+async function advanceOptional(phone: string, queue: string[], index: number, context: any) {
+  const nextIndex = index + 1
+  await updateConversationContext(phone, { optionalIndex: nextIndex })
+  if (nextIndex < queue.length) {
+    await askNextOptional(phone, queue, nextIndex)
+    return
+  }
+  const state = await getConversationState(phone)
+  await showFinalReview(phone, state?.context || context)
+}
+
+async function saveOptionalValue(phone: string, queue: string[], index: number, context: any, value: string) {
+  const key = queue[index]
+  const fields = { ...(context.fields || {}) }
+  setFieldValue(fields, key, value)
+  await updateConversationContext(phone, { fields })
+  await advanceOptional(phone, queue, index, { ...context, fields })
+}
+
+async function handleOptionalCollection(phone: string, text: string, context: any) {
+  const queue: string[] = context.optionalQueue || []
+  const index = context.optionalIndex || 0
+  const key = queue[index]
+  if (!key) {
+    await showFinalReview(phone, context)
+    return
+  }
+  const item = OPTIONAL_FIELDS.find(i => i.key === key)
+  if (!item) {
+    await advanceOptional(phone, queue, index, context)
+    return
+  }
+
+  const trimmed = text.trim()
+
+  if (trimmed.toLowerCase() === 'skip' || trimmed === REGISTRATION_BUTTONS.skip) {
+    logOnboarding('registration_optional_skipped', { phone: maskPhone(phone), field: key })
+    await advanceOptional(phone, queue, index, context)
+    return
+  }
+
+  if (key === 'website' && !looksLikeWebsite(trimmed)) {
+    await sendInteractiveButtons(
+      phone,
+      `⚠️ That doesn't look like a website link (we expect something like https://example.co.zw).\n\n${item.prompt}`,
+      [{ id: REGISTRATION_BUTTONS.skip, title: 'Skip' }]
+    )
+    return
+  }
+
+  if (key === 'password') {
+    const validation = validatePassword(trimmed)
+    if (!validation.ok) {
+      await sendInteractiveButtons(
+        phone,
+        `❌ ${validation.reason}\n\n${item.prompt}`,
+        [{ id: REGISTRATION_BUTTONS.skip, title: 'Skip' }]
+      )
+      return
+    }
+    await updateConversationContext(phone, { password: trimmed })
+    await advanceOptional(phone, queue, index, context)
+    return
+  }
+
+  await saveOptionalValue(phone, queue, index, context, trimmed)
 }
 
 export async function handleRegistrationMessage(phone: string, text: string, context: any) {
@@ -242,9 +379,14 @@ export async function handleRegistrationMessage(phone: string, text: string, con
     return
   }
 
+  if (context.step === 'optional_fields') {
+    await handleOptionalCollection(phone, text, context)
+    return
+  }
+
   if (context.step === 'review_extracted') {
     if (lower === 'proceed' || lower === 'yes' || lower === 'continue' || lower === 'ok' || lower === REGISTRATION_BUTTONS.proceed) {
-      await showFinalReview(phone, context)
+      await startOptionalCollection(phone, context)
       return
     }
     if (lower === 'edit' || lower === REGISTRATION_BUTTONS.edit) {
@@ -289,8 +431,15 @@ export async function handleRegistrationMessage(phone: string, text: string, con
 
   // Final review stage
   if (context.step === 'final_review') {
-    if (lower === 'publish' || lower === 'submit' || lower === 'yes') {
+    if (lower === 'publish' || lower === 'submit' || lower === 'yes' || lower === REGISTRATION_BUTTONS.publish) {
       await submitRegistration(phone, context)
+      return
+    }
+    if (lower === 'edit' || lower === REGISTRATION_BUTTONS.edit) {
+      await sendWhatsAppMessage(
+        phone,
+        `✏️ To change a detail, reply with:\n\`edit Field: New Value\`\n\nExample: \`edit City: Bulawayo\`\n\nThen tap or type *publish*.`
+      )
       return
     }
     if (lower.startsWith('edit ')) {
@@ -314,7 +463,23 @@ export async function handleRegistrationMessage(phone: string, text: string, con
           if (key === 'categories') listing[key] = [fieldValue]
           else listing[key] = fieldValue
           await updateConversationContext(phone, { listing })
-          await showFinalReview(phone, { ...context, listing })
+          const fresh = await getConversationState(phone)
+          await showFinalReview(phone, { ...(fresh?.context || context), listing })
+          return
+        }
+
+        if (fieldName.includes('password')) {
+          const validation = validatePassword(fieldValue)
+          if (!validation.ok) {
+            await sendWhatsAppMessage(
+              phone,
+              `❌ ${validation.reason}\n\nTry again: \`edit Password: YourChoice123\``
+            )
+            return
+          }
+          await updateConversationContext(phone, { password: fieldValue })
+          const fresh = await getConversationState(phone)
+          await showFinalReview(phone, { ...(fresh?.context || context), listing, password: fieldValue })
           return
         }
       }
@@ -482,15 +647,8 @@ async function handleFieldCollection(phone: string, text: string, context: any) 
     return
   }
 
-  // All required fields collected — move to final review.
-  await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', {
-    ...context,
-    fields,
-    missing,
-    currentMissingIndex: missing.length,
-    step: 'final_review',
-  })
-  await showFinalReview(phone, { ...context, fields })
+  // All required fields collected — collect the optional details next.
+  await startOptionalCollection(phone, { ...context, fields, missing, currentMissingIndex: missing.length })
 }
 
 async function showFinalReview(phone: string, context: any) {
@@ -524,7 +682,7 @@ async function showFinalReview(phone: string, context: any) {
     listing,
   })
 
-  await sendWhatsAppMessage(
+  await sendInteractiveButtons(
     phone,
     `🏪 *Your listing — Ready to submit*\n\n` +
       `✓ Name: ${name}\n` +
@@ -535,10 +693,15 @@ async function showFinalReview(phone: string, context: any) {
       `${description ? `✓ Description: ${description}\n` : ''}` +
       `${website ? `✓ Website: ${website}\n` : ''}` +
       `${address ? `✓ Address: ${address}\n` : ''}` +
+      `${context.password ? '✓ Portal password: set\n' : ''}` +
       `\nActivation: ${context.approvedPlan === 'trial' ? TRIAL_PLAN_LABEL + ' (starts when an admin approves)' : `Paid — USD ${formatUsd(PLAN_CONFIG['1m'].price)}/month`}\n\n` +
-      `To edit a field, reply with: \`edit Field: New Value\`\n` +
+      `Reply \`edit Field: New Value\` to change a detail.\n` +
       `Example: \`edit City: Bulawayo\`\n\n` +
-      `Tap or type *publish* when ready.`
+      `Tap *🚀 Publish listing* when ready.`,
+    [
+      { id: REGISTRATION_BUTTONS.publish, title: '🚀 Publish listing' },
+      { id: REGISTRATION_BUTTONS.edit, title: '✏️ Edit details' },
+    ]
   )
 }
 
@@ -593,12 +756,43 @@ async function submitRegistration(phone: string, context: any) {
     description: listingData.description || '',
     website: listingData.website || '',
     address: listingData.address || '',
+    generateSite: !listingData.website,
   })
 
   if ('error' in result) {
     await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', { ...context, step: 'final_review', submitting: false })
     await sendWhatsAppMessage(phone, `❌ Error creating listing: ${result.error}\n\nPlease type *publish* to try again or *cancel*.`)
     return
+  }
+
+  const fullPhone = toFullPhone('+263', listingData.phone || phone)
+  let portalLine = `🔐 Set your portal password anytime: ${SITE_URL}/account-setup?token=${result.editToken}`
+
+  if (context.password) {
+    try {
+      const response = await fetch(`${SITE_URL}/api/account/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          edit_token: result.editToken,
+          phone: fullPhone,
+          password: context.password,
+        }),
+      })
+      if (response.ok) {
+        portalLine = `✅ Portal account created — log in at ${SITE_URL}/login with your number and password.`
+      } else {
+        logOnboarding('portal_account_create_failed', {
+          phone: maskPhone(phone),
+          status: response.status,
+        })
+      }
+    } catch (err) {
+      logOnboarding('portal_account_create_failed', {
+        phone: maskPhone(phone),
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
   }
 
   // Record a trial *request* only. The 90 days start later, when an admin
@@ -641,7 +835,9 @@ async function submitRegistration(phone: string, context: any) {
       `Business ID: ${result.businessId}\n` +
       `Username: @${result.username}\n\n` +
       `Our team will review your listing within 24 hours.` +
-      activationLine
+      activationLine +
+      `\n\n${portalLine}\n` +
+      `✏️ Edit anytime: ${SITE_URL}/edit?token=${result.editToken}`
   )
 }
 
