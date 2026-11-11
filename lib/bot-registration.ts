@@ -27,7 +27,7 @@ import {
 } from './bot-state.js'
 import { analyseBusinessMaterial, RegistrationFields } from './ai-registration.js'
 import { categories, matchCategory } from '../data/categories.js'
-import { createListing } from './listing-create.js'
+import { createListing, autoRequestUnapprovedFeatures, adminRequestNotice } from './listing-create.js'
 import { toFullPhone } from './phone.js'
 import { SITE_URL } from './site-url.js'
 import { requestTrial } from './trial-helpers.js'
@@ -763,6 +763,26 @@ async function submitRegistration(phone: string, context: any) {
     await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', { ...context, step: 'final_review', submitting: false })
     await sendWhatsAppMessage(phone, `❌ Error creating listing: ${result.error}\n\nPlease type *publish* to try again or *cancel*.`)
     return
+  }
+
+  // Push admin-review requests for any unapproved city / area (mirrors the
+  // web form's feature requests). When an admin verifies the business, these
+  // are auto-approved and the location lands in the cities/areas tables.
+  try {
+    const newRequests = await autoRequestUnapprovedFeatures(result.id, {
+      categories: result.categories,
+      city: result.city || '',
+      areas: listingData.area ? [listingData.area] : [],
+    })
+    const adminNotice = adminRequestNotice(result.name, result.businessId, newRequests)
+    if (adminNotice && process.env.ADMIN_WHATSAPP) {
+      await sendWhatsAppMessage(process.env.ADMIN_WHATSAPP, adminNotice).catch(() => {})
+    }
+  } catch (err) {
+    logOnboarding('auto_location_request_failed', {
+      phone: maskPhone(phone),
+      error: err instanceof Error ? err.message : String(err),
+    })
   }
 
   const fullPhone = toFullPhone('+263', listingData.phone || phone)

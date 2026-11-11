@@ -1,6 +1,7 @@
 import { getSupabase } from './supabase-server.js'
 import { zimbabweCities } from '../data/zimbabwe-locations.js'
 import { categories as staticCategories } from '../data/categories.js'
+import { getApprovedAreas, getApprovedCities, getApprovedCategories } from './approved-data.js'
 import { toFullPhone, normalizeVoicePhone } from './phone.js'
 import { generateBusinessId } from './business-id.js'
 import { normalizeUsername, suggestUsername } from './username.js'
@@ -89,10 +90,16 @@ export async function createListing(
   }
 
   const validCityNames = new Set(zimbabweCities.map(c => c.name))
-  const isRemote = body.isRemote === true || (typeof body.city === 'string' && (body.city === 'remote' || body.city === '*'))
-  const isPendingCity = body.pendingCity === true && typeof body.city === 'string' && body.city.trim().length > 0 && body.city !== 'remote' && body.city !== '*'
-  const cleanCity = typeof body.city === 'string'
-    ? (isRemote ? '' : validCityNames.has(body.city) ? body.city : isPendingCity ? body.city.trim() : '')
+  const rawCityInput = typeof body.city === 'string' ? body.city : ''
+  const isRemote = body.isRemote === true || rawCityInput === 'remote' || rawCityInput === '*'
+  // Unknown towns are kept as "pending" locations (admin reviews them) instead
+  // of being silently dropped — same treatment the web form gives custom names.
+  const trimmedCity = rawCityInput.trim()
+  const isPendingCity =
+    !isRemote && trimmedCity.length > 0 &&
+    (body.pendingCity === true || !validCityNames.has(trimmedCity))
+  const cleanCity = rawCityInput
+    ? (isRemote ? '' : validCityNames.has(trimmedCity) ? trimmedCity : isPendingCity ? trimmedCity : '')
     : ''
 
   const voicePhoneInput = typeof body.voicePhone === 'string' ? body.voicePhone.trim() : ''
@@ -322,4 +329,87 @@ export async function createListing(
     isYellowPages,
     pendingPayment: !isYellowPages,
   }
+}
+
+export interface AutoRequestInput {
+  categories: string[]
+  city: string
+  areas: string[]
+}
+
+/** After a listing is created, push admin-review requests for any location or
+ * category value that is not on the approved lists — the chatbot equivalent of
+ * the web form's feature requests. When a business is later verified, these
+ * requests are auto-approved and the location lands in the cities/areas
+ * tables for future users. Returns human-readable labels of what was newly
+ * requested (empty when everything was already approved). */
+export async function autoRequestUnapprovedFeatures(
+  businessId: string,
+  input: AutoRequestInput
+): Promise<string[]> {
+  const supabase = getSupabase()
+  const created: string[] = []
+
+  const push = async (type: 'category' | 'city' | 'area', name: string, city: string, label: string) => {
+    const clean = name.trim().slice(0, 60)
+    if (!clean) return
+    const { data: existing } = await supabase
+      .from('feature_requests')
+      .select('id, status')
+      .eq('business_id', businessId)
+      .eq('type', type)
+      .ilike('name', clean)
+      .maybeSingle()
+    if (existing) return
+    const { error } = await supabase
+      .from('feature_requests')
+      .insert({ type, name: clean, city, business_id: businessId, status: 'pending' })
+    if (!error) created.push(label)
+  }
+
+  const city = (input.city || '').trim()
+  const areas = (input.areas || []).map(a => (a || '').trim()).filter(Boolean)
+
+  if (city) {
+    const approvedCities = await getApprovedCities()
+    if (!approvedCities.some(c => c.name.toLowerCase() === city.toLowerCase())) {
+      await push('city', city, '', `city: ${city}`)
+    }
+    const approvedAreas = await getApprovedAreas()
+    const knownInCity = new Set(
+      approvedAreas.filter(a => a.city.toLowerCase() === city.toLowerCase()).map(a => a.name.toLowerCase())
+    )
+    for (const area of areas) {
+      if (!knownInCity.has(area.toLowerCase())) await push('area', area, city, `area: ${area} (${city})`)
+    }
+  } else {
+    for (const area of areas) await push('area', area, city, `area: ${area}`)
+  }
+
+  const approvedCats = await getApprovedCategories()
+  for (const category of input.categories || []) {
+    const c = (category || '').trim()
+    if (c && !approvedCats.some(x => x.name.toLowerCase() === c.toLowerCase())) {
+      await push('category', c, '', `category: ${c}`)
+    }
+  }
+
+  return created
+}
+
+/** Admin WhatsApp notice for newly auto-created requests (null when none). */
+export function adminRequestNotice(
+  businessName: string,
+  businessCode: string,
+  labels: string[]
+): string | null {
+  if (!labels.length) return null
+  return [
+    '🆕 *New location/category request*',
+    '',
+    `Business: ${businessName} (${businessCode})`,
+    ...labels.map(l => `• ${l}`),
+    '',
+    `Review: ${SITE_URL}/admin`,
+  ].join('\n')
 }

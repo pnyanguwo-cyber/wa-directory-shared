@@ -540,74 +540,56 @@ export function renderWelcomeInstructions(greeting?: string): string {
   ].join('\n')
 }
 
-/** Full first-contact welcome (owner-approved copy). The interactive menu
- * list is attached right after this text; channel line only when set. */
-export function renderFirstWelcome(channelLink: string): string {
+/** Full first-contact welcome (owner-approved copy). The interactive menu is
+ * attached to THIS message as the list body (menu below the text). */
+export function renderFirstWelcome(name?: string, channelLink?: string): string {
+  const who = (name || '').trim()
   const lines = [
-    '🎉 *Welcome to WA Directory!*',
-    'Your shortcut to buying and selling without data.',
-    '',
-    'Looking for something or someone? Tell me what you need and your town, and I\'ll help you find a match.',
+    who ? `Welcome ${who} to WA Directory!` : 'Welcome to WA Directory!',
+    'Looking for something or someone? Simply tell me what you need and your town, and I\'ll help you find a match.',
     '',
     '*What can you find?*',
-    '🛍️ Products and services',
-    '🏢 Business contacts',
-    '👤 Personal contacts listed on WA Directory',
     '',
-    '*How to search*',
-    'Simply send what you\'re looking for and your town.',
+    '🛍️ *Products & Services*',
+    'Find products, shops and service providers.',
+    'E.g. Bread Chinhoyi',
     '',
-    'bread in Chinhoyi',
-    'plumber in Bulawayo',
-    'John in Harare',
+    '🏢 *Business Contacts*',
+    'Find businesses and their contact details.',
+    'E.g. Farm and City Harare',
     '',
-    'You can also send just *plumber* to see matches nationwide. Photos and voice notes work too.',
+    '👤 *Personal Contacts*',
+    'Find individuals listed on WA Directory.',
+    'E.g. John Mawere Harare',
     '',
-    '📸 You can also *see* the goods: open a business match and tap 🧺 *Browse all items* to view photos.',
-    '',
-    '*You name your price*',
-    'Have a budget in mind? Include your offer in the search.',
-    '',
-    'bread Chinhoyi USD 1',
-    '',
-    'Suppliers can accept your price or make a counteroffer, so you can negotiate a deal.',
-    '',
-    '*Need something else?* 👇🏽',
-    'To register your business or personal contact, manage your subscription or get help, open the list below and choose an option.',
-    '',
-    '*Terms and Conditions*',
-    'By searching on WA Directory, you agree to our Terms and Conditions. Please read them here:',
-    '🌐 https://wadirectory.vercel.app',
-    '',
-    '*Let\'s find what you need!*',
+    '🚨 *Emergency Contacts*',
+    'Find essential emergency services and contacts.',
+    'E.g. Police Chinhoyi, Fire Brigade Harare',
   ]
   if (channelLink) {
-    lines.push('', '🔁 Suppliers: join our WhatsApp channel for live buyer leads & updates:', channelLink)
+    lines.push(
+      '',
+      'Join our channel for live sales, updates and tutorials:',
+      channelLink
+    )
   }
+  lines.push(
+    '',
+    'To register your business, post a need, order items or get help, open the menu below 👇'
+  )
   return lines.join('\n')
 }
 
-/** Returning customers get a short, named welcome (owner-approved copy). */
+/** Returning customers get a short, time-based greeting (owner-approved
+ * copy). Harare is UTC+2 all year (CAT) — computed from server UTC time. */
 export function renderWelcomeBack(name?: string): string {
-  const lines: string[] = []
+  const hour = (new Date().getUTCHours() + 2) % 24
+  const part = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening'
   const first = (name || '').trim().split(' ')[0]
-  if (first) lines.push(`Hi ${first}!`)
-  lines.push('Hey, welcome back!', '')
-  lines.push(
-    '*What are you looking for today?*',
-    '🛍️ Products and services (e.g. *bread in Chinhoyi*)',
-    '🏢 Business contacts (e.g. *ABC Hardware in Harare*)',
-    '👤 Personal contacts listed on WA Directory (e.g. *John Mawere in Harare*)',
-    '',
-    'You can also send a photo or a voice note in English.',
-    '',
-    '📸 See what businesses sell - tap 🧺 *Browse all items* on any match.',
-    '',
-    'Have a price in mind? Include your offer in the search. Suppliers can accept it or make a counteroffer.',
-    '',
-    '*Need something else?* 👇🏽',
-    'To register your business or personal contact, manage your subscription or get help, open the list below and choose an option.'
-  )
+  const lines = [first ? `Good ${part}, ${first}!` : `Good ${part}!`]
+  lines.push('What are we looking for today and where?')
+  lines.push('')
+  lines.push('If you need help or other options, open the menu below 👇')
   return lines.join('\n')
 }
 

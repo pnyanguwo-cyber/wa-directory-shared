@@ -8,7 +8,7 @@
 
 import { zimbabweCities } from '../data/zimbabwe-locations'
 import { getSupabase } from './supabase-server'
-import { matchCategoryAgainst, type ApprovedCategory } from './approved-data'
+import { matchCategoryAgainst, type ApprovedCategory, getApprovedCities, getApprovedAreas } from './approved-data'
 
 export type LearnedKind = 'city' | 'area' | 'category'
 
@@ -183,6 +183,17 @@ export async function findCityLearned(text: string): Promise<string | null> {
     await learnMapping('city', norm, city)
     return city
   }
+
+  // DB-approved cities (admin-approved locations, e.g. from feature-request
+  // approvals): exact or contained match, then learned for instant reuse.
+  const approved = await getApprovedCities()
+  const approvedHit =
+    approved.find((c) => normalizeLearnedRaw(c.name) === norm) ||
+    approved.find((c) => lower.includes(c.name.toLowerCase()))
+  if (approvedHit) {
+    await learnMapping('city', norm, approvedHit.name)
+    return approvedHit.name
+  }
   return null
 }
 
@@ -215,6 +226,18 @@ export async function findAreaLearned(city: string, text: string): Promise<strin
   if (area) {
     await learnMapping('area', scopedKey, area)
     return area
+  }
+
+  // DB-approved areas for this city (admin-approved additions): exact or
+  // contained match, then learned for instant reuse.
+  const approvedAreas = await getApprovedAreas()
+  const scoped = approvedAreas.filter((a) => normalizeLearnedRaw(a.city) === normCity)
+  const approvedHit =
+    scoped.find((a) => normalizeLearnedRaw(a.name) === normText) ||
+    scoped.find((a) => lower.includes(a.name.toLowerCase()))
+  if (approvedHit) {
+    await learnMapping('area', scopedKey, approvedHit.name)
+    return approvedHit.name
   }
   return null
 }

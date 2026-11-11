@@ -132,6 +132,7 @@ Extract only facts that are visibly present.
 Strict rules:
 - Never invent or guess a phone digit, email, website, address, suburb, city, opening hours or legal name.
 - Do not infer a precise location from a city or postal address. Return the city only if it is printed; leave the area/address empty when absent.
+- "address" is the PHYSICAL street address of the premises (where the business is located). "area" is the suburb/neighbourhood the premises are in. Neither is the delivery/service coverage area — never copy the physical address into "area" as coverage.
 - Distinguish the trading name from a legal/registered name. Only fill legal_name when explicitly printed (for example "Pvt Ltd", "Private Limited", "(PBC)").
 - Phone and WhatsApp may differ. Fill whatsapp only when a number is explicitly labelled WhatsApp or a wa.me link is shown; otherwise leave it empty.
 - NEW: phone_is_whatsapp — set value to "true" ONLY if the image explicitly labels the phone as WhatsApp (e.g. "WhatsApp:", "wa.me/", WhatsApp logo, chat bubble icon). Otherwise set to "false" or leave empty. This tells us whether the captured phone is a WhatsApp number.
@@ -172,7 +173,7 @@ const QUESTION_SETS: Record<string, string[]> = {
   food: ['What type of food or cuisine do you serve?', 'Do you offer delivery or takeaway?'],
   retail: ['What product types or brands do you stock?', 'Do you offer delivery or pickup?'],
   hardware: ['What product categories do you supply?', 'Do you sell wholesale, retail, or both?'],
-  service: ['Which services do you offer?', 'Which areas do you cover?'],
+  service: ['Which services do you offer?', 'Which areas do you deliver to or serve? (This can be different from your physical address.)'],
 }
 
 function questionGroupFor(category: string): keyof typeof QUESTION_SETS {
