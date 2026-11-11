@@ -225,7 +225,7 @@ export function renderDetailCard(b: DetailData): string {
 
   const shopLine =
     b.generateSite && b.paymentStatus === 'active' && b.slug
-      ? ['🪄 Online shop', `${SITE_URL}/site/${b.slug}`]
+      ? ['🌐 Website / online shop', `${SITE_URL}/site/${b.slug}`]
       : []
   return [
     ...lines,
