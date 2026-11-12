@@ -567,10 +567,10 @@ export function renderFirstWelcome(name?: string, channelLink?: string): string 
     'Looking for something or someone? Simply tell me what you need and your town, and I\'ll help you find a match.',
     '',
     '*What can you find?*',
-    '🛍️ *Products & Services* — E.g. Bread Chinhoyi',
-    '🏢 *Business Contacts* — E.g. Farm and City Harare',
-    '👤 *Personal Contacts* — individuals listed on WA Directory',
-    '🚨 *Emergency Contacts* — E.g. Police Chinhoyi, Fire Brigade Harare',
+    '🛍️ *Products & Services*: e.g. bread in Chinhoyi',
+    '🏢 *Business Contacts*: e.g. Farm and City in Harare',
+    '👤 *Personal Contacts*: individuals listed on WA Directory',
+    '🚨 *Emergency Contacts*: e.g. Police in Chinhoyi, Fire Brigade in Harare',
     '',
     '*Register your business and get:*',
     '🌐 A free business website',
@@ -588,7 +588,7 @@ export function renderFirstWelcome(name?: string, channelLink?: string): string 
   lines.push(
     '',
     '*Want your account deleted?*',
-    'Ask support - WhatsApp +263773791864 or wadirectory@proton.me. Tell us the number you registered with; a reason is optional. Deletion can take up to 7 days.',
+    'Ask support on WhatsApp +263773791864 or email wadirectory@proton.me. Tell us the number you registered with; a reason is optional. Deletion can take up to 7 days.',
     '',
     'To register your business, post a need, order items or get help, open the menu below 👇'
   )
