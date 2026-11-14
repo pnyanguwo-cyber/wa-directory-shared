@@ -144,7 +144,14 @@ export async function expandSearchQuery(query: string): Promise<string[]> {
   try {
     const match = text.match(/\[[\s\S]*?\]/)
     if (match) {
-      const result = JSON.parse(match[0]) as string[]
+      // Gemini occasionally returns null/empty elements inside the array;
+      // callers call string methods on every element, so anything that is
+      // not a non-empty string must be dropped BEFORE it is cached — a
+      // poisoned cache entry would crash every future search that day.
+      const parsed = JSON.parse(match[0]) as unknown[]
+      const result = parsed.filter(
+        (s): s is string => typeof s === 'string' && !!s.trim()
+      )
       await setCached(cacheKey, result)
       return result
     }
