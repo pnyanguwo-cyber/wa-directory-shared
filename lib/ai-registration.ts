@@ -240,7 +240,7 @@ export async function analyseBusinessMaterial(
   const category: ExtractedField =
     categoryRaw.status === 'suggested' && mappedCategory !== 'Other'
       ? { ...categoryRaw, value: mappedCategory }
-      : { ...categoryRaw, value: '', confidence: 0, status: 'missing' }
+      : categoryRaw
 
   const offeringsField = asRecord(obj.offerings)
   const socialsField = asRecord(obj.socials)

@@ -48,3 +48,19 @@ export function normalizeVoicePhone(raw: string): string {
   if (digits.startsWith('00')) digits = digits.slice(2)
   return digits
 }
+
+// Advisory classification for FREE-TYPED phone numbers collected during
+// registration. Used to warn (never block) when the number looks
+// international:
+//   'zw'    → plausibly Zimbabwean (trunk 0, +263, or bare 9-digit local)
+//   'nonzw' → looks international (country code baked in, length ≥ 11)
+//   'bad'   → too short / garbage
+export function classifyPhone(raw: string): 'zw' | 'nonzw' | 'bad' {
+  const digits = digitsOnly(raw)
+  if (!digits) return 'bad'
+  if (digits.startsWith('263')) return 'zw'
+  if (digits.startsWith('0')) return 'zw'
+  if (digits.length >= 11) return 'nonzw'
+  if (digits.length >= 9) return 'zw'
+  return 'bad'
+}

@@ -28,7 +28,7 @@ import {
 import { analyseBusinessMaterial, RegistrationFields } from './ai-registration.js'
 import { categories, matchCategory } from '../data/categories.js'
 import { createListing, autoRequestUnapprovedFeatures, adminRequestNotice } from './listing-create.js'
-import { toFullPhone } from './phone.js'
+import { toFullPhone, classifyPhone } from './phone.js'
 import { SITE_URL } from './site-url.js'
 import { requestTrial } from './trial-helpers.js'
 import { PLAN_CONFIG, TRIAL_PLAN_LABEL, formatUsd, type PlanType, type TrialStatus } from '../types/index.js'
@@ -57,6 +57,9 @@ export const REGISTRATION_BUTTONS = {
   planTrial: 'reg_plan_trial',
   planPaid: 'reg_plan_paid',
   publish: 'reg_publish',
+  talkAdmin: 'reg_talk_admin',
+  askAdminPermission: 'reg_ask_admin_permission',
+  changePhone: 'reg_change_phone',
 } as const
 
 function imageFirstMessage(planLabel: string) {
@@ -224,12 +227,16 @@ async function startOptionalCollection(phone: string, context: any) {
   const fields = (context.fields || {}) as unknown as Record<string, { value?: string } | undefined>
   const queue = OPTIONAL_FIELDS.filter(item => item.key === 'password' || !fields[item.key]?.value)
 
-  await setConversationState(phone, 'REGISTRATION_COLLECTING_OPTIONAL', {
+  const optionalSaved = await setConversationState(phone, 'REGISTRATION_COLLECTING_OPTIONAL', {
     ...context,
     step: 'optional_fields',
     optionalQueue: queue.map(item => item.key),
     optionalIndex: 0,
   })
+  if (!optionalSaved) {
+    await sendWhatsAppMessage(phone, '⚠️ Something went wrong saving your progress. Please send your last answer again.')
+    return
+  }
   await sendWhatsAppMessage(phone, `🎉 All required details captured. Just a few optional extras — skip any you don't need.`)
   await askNextOptional(phone, queue.map(item => item.key), 0)
 }
@@ -321,6 +328,25 @@ async function handleOptionalCollection(phone: string, text: string, context: an
   await saveOptionalValue(phone, queue, index, context, trimmed)
 }
 
+// Tell the admin that a business needs help with an international phone
+// number so a human can add it to the listing by hand (the full numbers are
+// included on purpose — the admin must be able to reach out directly).
+async function notifyAdminsOfHandoff(phone: string, pendingPhone: string) {
+  const adminPhone = process.env.ADMIN_WHATSAPP
+  if (!adminPhone) return
+  try {
+    await sendWhatsAppMessage(
+      adminPhone,
+      `📞 *Handoff requested*\nBusiness ${maskPhone(phone)} asked for help with the phone number ${pendingPhone} they entered during registration. Reply on their WhatsApp chat or reach out to ${maskPhone(phone)} to arrange it.`
+    )
+  } catch (err) {
+    logOnboarding('registration_handoff_notify_failed', {
+      phone: maskPhone(phone),
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
+}
+
 export async function handleRegistrationMessage(phone: string, text: string, context: any) {
   const lower = text.toLowerCase().trim()
 
@@ -328,6 +354,39 @@ export async function handleRegistrationMessage(phone: string, text: string, con
     await clearConversationState(phone)
     logOnboarding('registration_cancelled', { phone: maskPhone(phone) })
     await sendWhatsAppMessage(phone, '❌ Registration cancelled. Type *register* whenever you are ready to start again.')
+    return
+  }
+
+  // Non-ZW phone captured and pending a decision (ask admin / change
+  // number / talk to team). Buttons above re-enter this branch.
+  if (context.pendingPhone) {
+    const pendingPhone = context.pendingPhone
+    if (text === REGISTRATION_BUTTONS.talkAdmin || lower === 'help' || lower === 'help me') {
+      logOnboarding('registration_handoff_requested', { phone: maskPhone(phone) })
+      await notifyAdminsOfHandoff(phone, pendingPhone)
+      await sendWhatsAppMessage(
+        phone,
+        `👋 *We'll help you get it right.*\n\nA member of our team can add your details by hand — just tap below and say hello:\n\n👉 https://wa.me/263773791864\n\nWe've been notified and will reach out to you too. Registration is paused — you can also use the buttons above to continue without help.`
+      )
+      return
+    }
+    if (text === REGISTRATION_BUTTONS.askAdminPermission) {
+      logOnboarding('registration_nonzw_admin_ok', { phone: maskPhone(phone) })
+      await notifyAdminsOfHandoff(phone, pendingPhone)
+      await handleFieldCollection(phone, pendingPhone, { ...context, pendingPhone: undefined, adminPermissionRequested: true })
+      return
+    }
+    if (text === REGISTRATION_BUTTONS.changePhone) {
+      logOnboarding('registration_nonzw_change_phone', { phone: maskPhone(phone) })
+      await setConversationState(phone, 'REGISTRATION_COLLECTING_FIELDS', { ...context, pendingPhone: undefined })
+      await sendWhatsAppMessage(phone, `🔁 No problem.\n\n${getPromptForField('phone')}`)
+      return
+    }
+    if (classifyPhone(text) !== 'bad') {
+      await handleFieldCollection(phone, text, { ...context, pendingPhone: undefined })
+      return
+    }
+    await sendWhatsAppMessage(phone, `⚠️ The number ${pendingPhone} is still pending. Tap a button above to continue, or type *cancel* to abort.`)
     return
   }
 
@@ -626,18 +685,40 @@ async function handleFieldCollection(phone: string, text: string, context: any) 
 
   const currentFieldKey = missing[index]
   if (currentFieldKey) {
+    if (currentFieldKey === 'phone' && classifyPhone(text) === 'nonzw') {
+      const guardedSaved = await setConversationState(phone, 'REGISTRATION_COLLECTING_FIELDS', { ...context, pendingPhone: text })
+      if (!guardedSaved) {
+        await sendWhatsAppMessage(phone, '⚠️ Something went wrong saving your answer. Please send your phone number again.')
+        return
+      }
+      logOnboarding('registration_nonzw_phone_flagged', { phone: maskPhone(phone) })
+      await sendInteractiveButtons(
+        phone,
+        `⚠️ *The number ${text} doesn't look like a Zimbabwean number.*\n\nHow would you like to continue? Our team can also add it to your listing by hand.`,
+        [
+          { id: REGISTRATION_BUTTONS.askAdminPermission, title: '✅ Ask admin for help' },
+          { id: REGISTRATION_BUTTONS.changePhone, title: '🔁 Use a different number' },
+          { id: REGISTRATION_BUTTONS.talkAdmin, title: '💬 Talk to our team' },
+        ]
+      )
+      return
+    }
     const answer = currentFieldKey === 'category' ? (matchCategory(text) || text) : text
     setFieldValue(fields, currentFieldKey, answer)
   }
 
   const nextIndex = index + 1
   if (nextIndex < missing.length) {
-    await setConversationState(phone, 'REGISTRATION_COLLECTING_FIELDS', {
+    const advancedSaved = await setConversationState(phone, 'REGISTRATION_COLLECTING_FIELDS', {
       ...context,
       fields,
       missing,
       currentMissingIndex: nextIndex,
     })
+    if (!advancedSaved) {
+      await sendWhatsAppMessage(phone, '⚠️ Something went wrong saving your answer. Please send it again.')
+      return
+    }
     await sendWhatsAppMessage(
       phone,
       `✅ Saved.\n\n${getPromptForField(missing[nextIndex])}\n\n(${nextIndex + 1}/${missing.length})`
@@ -660,6 +741,10 @@ async function showFinalReview(phone: string, context: any) {
   const description = f.description?.value || ''
   const website = f.website?.value || ''
   const address = f.address?.value || ''
+  const phoneWarning =
+    classifyPhone(phoneVal) === 'nonzw'
+      ? `⚠️ Phone: ${phoneVal} is not a Zimbabwean number — our team will help add it correctly.\n`
+      : ''
 
   const listing = {
     name,
@@ -673,16 +758,21 @@ async function showFinalReview(phone: string, context: any) {
     notify: false,
   }
 
-  await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', {
+  const reviewSaved = await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', {
     ...context,
     step: 'final_review',
     fields: f,
     listing,
   })
+  if (!reviewSaved) {
+    await sendWhatsAppMessage(phone, '⚠️ Something went wrong saving your listing. Please send "done" again.')
+    return
+  }
 
   await sendInteractiveButtons(
     phone,
     `🏪 *Your listing — Ready to submit*\n\n` +
+      `${phoneWarning}` +
       `✓ Name: ${name}\n` +
       `✓ Category: ${category}\n` +
       `✓ City: ${city}\n` +
