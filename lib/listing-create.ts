@@ -18,6 +18,9 @@ export interface ListingInput {
   phone: string
   phoneType?: string
   voicePhone?: string
+  /** The owner's own words for the category, kept so an admin can confirm the
+   * match or turn it into a new category instead of it being silently mapped. */
+  requestedCategory?: string
   categories: string[]
   city?: string
   pendingCity?: boolean
@@ -202,6 +205,9 @@ export async function createListing(
         phone_type: isVoice ? 'voice' : 'whatsapp',
         whatsapp_link: isVoice ? null : `https://wa.me/${fullPhone}?text=${WA_MSG}`,
         voice_phone: cleanVoicePhone,
+        requested_category: typeof body.requestedCategory === 'string' && body.requestedCategory.trim()
+          ? body.requestedCategory.trim().slice(0, 60)
+          : null,
         catalog_link: typeof body.catalogLink === 'string' && body.catalogLink.trim() ? body.catalogLink.trim() : null,
         logo_url: typeof body.logoUrl === 'string' && body.logoUrl.trim() ? body.logoUrl.trim() : null,
         price_range: normalizedPrice,
@@ -335,6 +341,7 @@ export interface AutoRequestInput {
   categories: string[]
   city: string
   areas: string[]
+  requestedCategory?: string
 }
 
 /** After a listing is created, push admin-review requests for any location or
@@ -392,6 +399,12 @@ export async function autoRequestUnapprovedFeatures(
     if (c && !approvedCats.some(x => x.name.toLowerCase() === c.toLowerCase())) {
       await push('category', c, '', `category: ${c}`)
     }
+  }
+  // The owner's own wording is a category request in its own right: the AI
+  // guess on the listing is only a suggestion until an admin approves it.
+  const requested = (input.requestedCategory || '').trim()
+  if (requested && !approvedCats.some(x => x.name.toLowerCase() === requested.toLowerCase())) {
+    await push('category', requested, '', `category: ${requested}`)
   }
 
   return created

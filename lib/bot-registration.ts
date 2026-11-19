@@ -192,7 +192,7 @@ function startManualCollection(phone: string, context: any, opts: { collected?: 
   })
 }
 
-const OPTIONAL_FIELDS: { key: 'website' | 'address' | 'password'; label: string; prompt: string }[] = [
+const OPTIONAL_FIELDS: { key: 'website' | 'address' | 'calls' | 'password'; label: string; prompt: string }[] = [
   {
     key: 'website',
     label: 'Website',
@@ -202,6 +202,11 @@ const OPTIONAL_FIELDS: { key: 'website' | 'address' | 'password'; label: string;
     key: 'address',
     label: 'Physical address',
     prompt: `What's your physical address (so customers can find you)? Tap Skip if you don't have a storefront.`,
+  },
+  {
+    key: 'calls',
+    label: 'Calls number',
+    prompt: `Is there a number customers can call? Reply with it, or tap Skip if WhatsApp is the only way to reach you.`,
   },
   {
     key: 'password',
@@ -221,6 +226,71 @@ function looksLikeWebsite(value: string): boolean {
   const v = value.trim()
   if (/^https?:\/\//i.test(v)) return true
   return /^[^\s]+\.[^\s]+$/.test(v)
+}
+
+/** One typed correction, e.g. `Name: Green World` or `edit City: Bulawayo`. */
+type ListingEdit = { fieldKey: string; label: string; value: string }
+
+/**
+ * Map what the owner typed before the colon onto a listing field. Owners type
+ * the label in their own words, so the match is by keyword rather than an
+ * exact string: "Calls", "call number" and "telephone" all mean the same
+ * field. Returns null for anything that is not a correction, which lets the
+ * caller treat the message as an answer to a pending question instead.
+ */
+function parseListingEdit(text: string): ListingEdit | null {
+  const m = text.match(/^(?:edit\s+)?([A-Za-z][A-Za-z ]{2,20}?)\s*:\s*([\s\S]+)$/i)
+  if (!m) return null
+  const label = m[1].trim().toLowerCase()
+  const value = m[2].trim()
+  if (!value || value.length > 400) return null
+  // "Call" must be checked before "number" so "Calls number" is not a phone.
+  if (label.includes('call') || label.includes('telephone')) return { fieldKey: 'calls', label: 'Calls number', value }
+  if (label.includes('name')) return { fieldKey: 'business_name', label: 'Business name', value }
+  if (label.includes('categor')) return { fieldKey: 'category', label: 'Category', value }
+  if (label.includes('city') || label.includes('town')) return { fieldKey: 'city', label: 'City', value }
+  if (label.includes('phone') || label.includes('whatsapp') || label.includes('number')) return { fieldKey: 'phone', label: 'WhatsApp number', value }
+  if (label.includes('description') || label.includes('offer') || label.includes('bio')) return { fieldKey: 'description', label: 'Description', value }
+  if (label.includes('website') || label.includes('site')) return { fieldKey: 'website', label: 'Website', value }
+  if (label.includes('address')) return { fieldKey: 'address', label: 'Physical address', value }
+  if (label.includes('area') || label.includes('suburb')) return { fieldKey: 'area', label: 'Area', value }
+  if (label.includes('price')) return { fieldKey: 'price_range', label: 'Price range', value }
+  return null
+}
+
+/** The draft listing is always derived from the field set, never the other way
+ * round — otherwise an edit saved on the listing is silently reverted the next
+ * time the review screen rebuilds it from the fields. */
+function buildListingFromFields(fields: any): any {
+  const v = (key: string) => (fields?.[key]?.value || '').toString().trim()
+  return {
+    name: v('business_name'),
+    categories: [v('category') || 'Other'],
+    city: v('city'),
+    phone: v('phone'),
+    area: v('area'),
+    description: v('description'),
+    website: v('website'),
+    address: v('address'),
+    calls: v('calls'),
+    priceRange: v('price_range'),
+    requestedCategory: v('requested_category'),
+    notify: false,
+  }
+}
+
+/** Apply a typed correction to the field set and the draft listing together. */
+async function saveListingEdit(phone: string, context: any, edit: ListingEdit) {
+  const fields = { ...(context.fields || {}) }
+  setFieldValue(fields, edit.fieldKey, edit.value)
+  if (edit.fieldKey === 'category') setFieldValue(fields, 'requested_category', edit.value)
+  const listing = { ...(context.listing || {}), ...buildListingFromFields(fields) }
+  await updateConversationContext(phone, { fields, listing })
+  return { fields, listing }
+}
+
+function editConfirmation(edit: ListingEdit, nextStep: string): string {
+  return `✅ Updated *${edit.label}* to: ${edit.value}\n\n${nextStep}`
 }
 
 async function startOptionalCollection(phone: string, context: any) {
@@ -294,6 +364,27 @@ async function handleOptionalCollection(phone: string, text: string, context: an
   }
 
   const trimmed = text.trim()
+
+  // A correction typed while an optional question is pending belongs to the
+  // listing, not to that question. Without this an owner who taps "Edit
+  // details" mid-way has their fix swallowed as, say, the website answer.
+  const typedEdit = parseListingEdit(text)
+  if (typedEdit) {
+    await saveListingEdit(phone, context, typedEdit)
+    if (typedEdit.fieldKey === key) {
+      await advanceOptional(phone, queue, index, context)
+      return
+    }
+    await sendWhatsAppMessage(phone, editConfirmation(typedEdit, item.prompt))
+    return
+  }
+  if (trimmed.toLowerCase() === 'edit' || trimmed === REGISTRATION_BUTTONS.edit) {
+    await sendWhatsAppMessage(
+      phone,
+      `✏️ To change a detail, type it like this:\n\`City: Bulawayo\`\n\n${item.prompt}`
+    )
+    return
+  }
 
   if (trimmed.toLowerCase() === 'skip' || trimmed === REGISTRATION_BUTTONS.skip) {
     logOnboarding('registration_optional_skipped', { phone: maskPhone(phone), field: key })
@@ -456,28 +547,14 @@ export async function handleRegistrationMessage(phone: string, text: string, con
       return
     }
     // Accept both "edit City: Bulawayo" and the plain "City: Bulawayo".
-    const editMatch = text.match(/^(?:edit\s+)?([A-Za-z][A-Za-z ]{2,20}?)\s*:\s*([\s\S]+)$/i)
-    if (editMatch) {
-      const fieldName = editMatch[1].trim().toLowerCase()
-      const fieldValue = editMatch[2].trim()
-      const fields = context.fields || {}
-
-      let key: RequiredField | 'website' | 'address' | 'area' | '' = ''
-      if (fieldName.includes('name')) key = 'business_name'
-      else if (fieldName.includes('category')) key = 'category'
-      else if (fieldName.includes('city')) key = 'city'
-      else if (fieldName.includes('phone') || fieldName.includes('whatsapp')) key = 'phone'
-      else if (fieldName.includes('description') || fieldName.includes('offer')) key = 'description'
-      else if (fieldName.includes('website')) key = 'website'
-      else if (fieldName.includes('address')) key = 'address'
-      else if (fieldName.includes('area')) key = 'area'
-
-      if (key) {
-        setFieldValue(fields, key, fieldValue)
-        await updateConversationContext(phone, { fields })
-        await sendWhatsAppMessage(phone, `✅ Updated *${FIELD_LABELS[key as RequiredField] || key}* to: ${fieldValue}\n\nType *proceed* when ready, or keep editing (e.g. \`City: Bulawayo\`).`)
-        return
-      }
+    const typedEdit = parseListingEdit(text)
+    if (typedEdit) {
+      await saveListingEdit(phone, context, typedEdit)
+      await sendWhatsAppMessage(
+        phone,
+        editConfirmation(typedEdit, 'Type *proceed* when ready, or keep editing (e.g. `City: Bulawayo`).')
+      )
+      return
     }
 
     await sendWhatsAppMessage(
@@ -501,45 +578,30 @@ export async function handleRegistrationMessage(phone: string, text: string, con
       return
     }
     // Accept both "edit City: Bulawayo" and the plain "City: Bulawayo".
-    const editMatch = text.match(/^(?:edit\s+)?([A-Za-z][A-Za-z ]{2,20}?)\s*:\s*([\s\S]+)$/i)
-    if (editMatch) {
-      const fieldName = editMatch[1].trim().toLowerCase()
-      const fieldValue = editMatch[2].trim()
+    const passwordEdit = text.match(/^(?:edit\s+)?password\s*:\s*([\s\S]+)$/i)
+    if (passwordEdit) {
+      const fieldValue = passwordEdit[1].trim()
       const listing = context.listing || {}
-
-      if (fieldName.includes('password')) {
-        const validation = validatePassword(fieldValue)
-        if (!validation.ok) {
-          await sendWhatsAppMessage(
-            phone,
-            `❌ ${validation.reason}\n\nTry again: \`Password: YourChoice123\``
-          )
-          return
-        }
-        await updateConversationContext(phone, { password: fieldValue })
-        const fresh = await getConversationState(phone)
-        await showFinalReview(phone, { ...(fresh?.context || context), listing, password: fieldValue })
+      const validation = validatePassword(fieldValue)
+      if (!validation.ok) {
+        await sendWhatsAppMessage(
+          phone,
+          `❌ ${validation.reason}\n\nTry again: \`Password: YourChoice123\``
+        )
         return
       }
+      await updateConversationContext(phone, { password: fieldValue })
+      const fresh = await getConversationState(phone)
+      await showFinalReview(phone, { ...(fresh?.context || context), listing, password: fieldValue })
+      return
+    }
 
-      let key = ''
-      if (fieldName.includes('name')) key = 'name'
-      else if (fieldName.includes('category')) key = 'categories'
-      else if (fieldName.includes('city')) key = 'city'
-      else if (fieldName.includes('phone')) key = 'phone'
-      else if (fieldName.includes('description') || fieldName.includes('bio')) key = 'description'
-      else if (fieldName.includes('website')) key = 'website'
-      else if (fieldName.includes('address')) key = 'address'
-      else if (fieldName.includes('price')) key = 'priceRange'
-
-      if (key) {
-        if (key === 'categories') listing[key] = [fieldValue]
-        else listing[key] = fieldValue
-        await updateConversationContext(phone, { listing })
-        const fresh = await getConversationState(phone)
-        await showFinalReview(phone, { ...(fresh?.context || context), listing })
-        return
-      }
+    const typedEdit = parseListingEdit(text)
+    if (typedEdit) {
+      const saved = await saveListingEdit(phone, context, typedEdit)
+      const fresh = await getConversationState(phone)
+      await showFinalReview(phone, { ...(fresh?.context || context), ...saved })
+      return
     }
 
     await sendWhatsAppMessage(phone, `Type *publish* to submit your listing, or change a detail by typing it (e.g. \`City: Bulawayo\`).`)
@@ -684,6 +746,19 @@ async function handleFieldCollection(phone: string, text: string, context: any) 
   const index = context.currentMissingIndex || 0
 
   const currentFieldKey = missing[index]
+
+  // "Name: X" is a correction while questions are still being asked, unless
+  // the label is the question on screen — then it is simply the answer.
+  const typedEdit = parseListingEdit(text)
+  if (typedEdit && typedEdit.fieldKey !== currentFieldKey) {
+    await saveListingEdit(phone, context, typedEdit)
+    await sendWhatsAppMessage(
+      phone,
+      editConfirmation(typedEdit, getPromptForField(currentFieldKey || ''))
+    )
+    return
+  }
+
   if (currentFieldKey) {
     if (currentFieldKey === 'phone' && classifyPhone(text) === 'nonzw') {
       const guardedSaved = await setConversationState(phone, 'REGISTRATION_COLLECTING_FIELDS', { ...context, pendingPhone: text })
@@ -703,7 +778,16 @@ async function handleFieldCollection(phone: string, text: string, context: any) 
       )
       return
     }
-    const answer = currentFieldKey === 'category' ? (matchCategory(text) || text) : text
+    // The AI/bot may suggest an approved category, but it never gets the last
+    // word: the owner's own wording is kept on the listing so the admin can
+    // confirm the match or make it a new category.
+    const answer = currentFieldKey === 'category' ? (matchCategory(text) || 'Other') : text
+    if (currentFieldKey === 'category') {
+      const asked = text.trim()
+      if (asked && asked.toLowerCase() !== answer.toLowerCase()) {
+        setFieldValue(fields, 'requested_category', asked)
+      }
+    }
     setFieldValue(fields, currentFieldKey, answer)
   }
 
@@ -741,22 +825,14 @@ async function showFinalReview(phone: string, context: any) {
   const description = f.description?.value || ''
   const website = f.website?.value || ''
   const address = f.address?.value || ''
+  const calls = f.calls?.value || ''
+  const requestedCategory = f.requested_category?.value || ''
   const phoneWarning =
     classifyPhone(phoneVal) === 'nonzw'
       ? `⚠️ Phone: ${phoneVal} is not a Zimbabwean number — our team will help add it correctly.\n`
       : ''
 
-  const listing = {
-    name,
-    categories: [category],
-    city,
-    phone: phoneVal,
-    area,
-    description,
-    website,
-    address,
-    notify: false,
-  }
+  const listing = buildListingFromFields({ ...f, phone: { value: phoneVal }, city: { value: city } })
 
   const reviewSaved = await setConversationState(phone, 'REGISTRATION_FINAL_REVIEW', {
     ...context,
@@ -777,6 +853,8 @@ async function showFinalReview(phone: string, context: any) {
       `✓ Category: ${category}\n` +
       `✓ City: ${city}\n` +
       `✓ Phone: ${phoneVal}\n` +
+      `${calls ? `✓ Calls: ${calls}\n` : ''}` +
+      `${requestedCategory ? `· Category you described: ${requestedCategory} (our team confirms this)\n` : ''}` +
       `${area ? `✓ Area: ${area}\n` : ''}` +
       `${description ? `✓ Description: ${description}\n` : ''}` +
       `${website ? `✓ Website: ${website}\n` : ''}` +
@@ -843,6 +921,8 @@ async function submitRegistration(phone: string, context: any) {
     description: listingData.description || '',
     website: listingData.website || '',
     address: listingData.address || '',
+    voicePhone: listingData.calls || '',
+    requestedCategory: listingData.requestedCategory || '',
     generateSite: !listingData.website,
   })
 
@@ -860,6 +940,7 @@ async function submitRegistration(phone: string, context: any) {
       categories: result.categories,
       city: result.city || '',
       areas: listingData.area ? [listingData.area] : [],
+      requestedCategory: listingData.requestedCategory || '',
     })
     const adminNotice = adminRequestNotice(result.name, result.businessId, newRequests)
     if (adminNotice && process.env.ADMIN_WHATSAPP) {
@@ -886,6 +967,8 @@ async function submitRegistration(phone: string, context: any) {
         `Category: ${cats || '—'}`,
         `Location: ${result.city || 'Zimbabwe (whole country)'}`,
         `Phone: ${listingData.phone || phone}`,
+        ...(listingData.calls ? [`Calls: ${listingData.calls}`] : []),
+        ...(listingData.requestedCategory ? [`Owner described category as: ${listingData.requestedCategory}`] : []),
         'Reply *pending* then *verify 1*, or *verify <name> 30*.',
         `Approve: ${SITE_URL}/admin`,
       ].join('\n')
