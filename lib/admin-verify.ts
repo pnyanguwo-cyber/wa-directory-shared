@@ -2,8 +2,6 @@ import { getSupabase } from './supabase-server.js'
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from './whatsapp.js'
 import { SITE_URL } from './site-url.js'
 import { digitsOnly } from './phone.js'
-import { getBotSetting } from './bot-settings.js'
-import { renderChannelPitch } from './bot-templates.js'
 
 // Shared admin-verify engine: the WhatsApp bot and the dashboard mirror the
 // same rules here — fuzzy name lookup, day-based grants, and the "you are
@@ -157,7 +155,8 @@ export async function activateListingForDays(
 // The go-live moment, shared by the dashboard Approve button and the bot
 // verify command: approved template (works outside the 24h window) followed
 // by a best-effort links message — profile, auto-generated website, portal —
-// plus the channel pitch. The website link lands here, not just on payment.
+// plus the shop and channel instructions. The website link lands here, not
+// just on payment.
 export async function notifyBusinessLive(biz: {
   name: string
   phone: string | null
@@ -209,13 +208,4 @@ export async function notifyBusinessLive(biz: {
     console.error('[admin-verify] go-live links message failed:', e)
   }
 
-  const chOverride = await getBotSetting('channel_link')
-  const chLink = (chOverride || process.env.CHANNEL_LINK || '').trim()
-  if (chLink) {
-    try {
-      await sendWhatsAppMessage(to, renderChannelPitch(chLink))
-    } catch (e) {
-      console.error('[admin-verify] channel pitch failed:', e)
-    }
-  }
 }
