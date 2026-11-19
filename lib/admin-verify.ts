@@ -186,7 +186,6 @@ export async function notifyBusinessLive(biz: {
     `🏢 Profile: ${SITE_URL}/business/${slug}`,
     `🌐 Website: ${SITE_URL}/site/${slug}`,
     ...(biz.username ? [`🔑 Portal: ${SITE_URL}/portal (log in with @${biz.username})`] : []),
-    '📸 Send a product photo, then reply *name price* (e.g. *bread $2*) - it lands on your website shop shelf.',
   ]
   try {
     await sendWhatsAppMessage(
@@ -194,9 +193,14 @@ export async function notifyBusinessLive(biz: {
       [
         '🎉 *You are live on WA Directory!*',
         '',
-        `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} - customers can find you in search now.`,
+        `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} - customers can find you and your products in search now.`,
         '',
         ...links,
+        '',
+        '*How To Add products to your Online Shop*',
+        '📸 Send a product photo, then reply or caption it with *name and price* (e.g. *bread $2*) - it lands on your website shop shelf.',
+        '',
+        "Don't forget to join our channel to get updates and ask questions.",
         '',
         'Reply *help* anytime.',
       ].join('\n')

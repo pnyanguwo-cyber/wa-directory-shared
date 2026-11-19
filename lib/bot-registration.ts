@@ -57,6 +57,7 @@ export const REGISTRATION_BUTTONS = {
   planTrial: 'reg_plan_trial',
   planPaid: 'reg_plan_paid',
   publish: 'reg_publish',
+  cancel: 'reg_cancel',
   talkAdmin: 'reg_talk_admin',
   askAdminPermission: 'reg_ask_admin_permission',
   changePhone: 'reg_change_phone',
@@ -441,7 +442,7 @@ async function notifyAdminsOfHandoff(phone: string, pendingPhone: string) {
 export async function handleRegistrationMessage(phone: string, text: string, context: any) {
   const lower = text.toLowerCase().trim()
 
-  if (lower === 'cancel' || lower === 'quit' || lower === 'stop') {
+  if (lower === 'cancel' || lower === 'quit' || lower === 'stop' || lower === REGISTRATION_BUTTONS.cancel) {
     await clearConversationState(phone)
     logOnboarding('registration_cancelled', { phone: maskPhone(phone) })
     await sendWhatsAppMessage(phone, '❌ Registration cancelled. Type *register* whenever you are ready to start again.')
@@ -865,7 +866,7 @@ async function showFinalReview(phone: string, context: any) {
       `Tap *🚀 Publish listing* when ready.`,
     [
       { id: REGISTRATION_BUTTONS.publish, title: '🚀 Publish listing' },
-      { id: REGISTRATION_BUTTONS.edit, title: '✏️ Edit details' },
+      { id: REGISTRATION_BUTTONS.cancel, title: '❌ Cancel' },
     ]
   )
 }
