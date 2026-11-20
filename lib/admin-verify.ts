@@ -107,7 +107,7 @@ export async function activateListingForDays(
 
   const { data: existing } = await supabase
     .from('listing_subscriptions')
-    .select('id, expires_at')
+    .select('id, expires_at, amount, is_trial, paynow_reference')
     .eq('business_id', businessId)
     .eq('status', 'active')
     .maybeSingle()
@@ -118,10 +118,20 @@ export async function activateListingForDays(
       : now
   const expiresAt = new Date(base.getTime() + days * 86400000)
 
+  // A verify grant is free time, not a sale. `is_trial` keeps it out of the
+  // revenue and subscription reports, and no trial clock is set here: this is
+  // not the 90-day trial, so approving a listing does not spend it.
+  const freeGrant = (row: { amount?: number | null; paynow_reference?: string | null }) =>
+    Number(row.amount || 0) <= 0 && !row.paynow_reference
+
   if (existing) {
     const { error } = await supabase
       .from('listing_subscriptions')
-      .update({ expires_at: expiresAt.toISOString(), renewal_notified_at: null })
+      .update({
+        expires_at: expiresAt.toISOString(),
+        renewal_notified_at: null,
+        ...(freeGrant(existing) ? { is_trial: true, auto_confirmed_at: null } : {}),
+      })
       .eq('id', existing.id)
     if (error) return { ok: false, error: error.message }
   } else {
@@ -134,7 +144,7 @@ export async function activateListingForDays(
         plan: '1m',
         started_at: now.toISOString(),
         expires_at: expiresAt.toISOString(),
-        auto_confirmed_at: now.toISOString(),
+        is_trial: true,
       })
     if (error) return { ok: false, error: error.message }
   }

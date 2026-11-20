@@ -28,6 +28,7 @@ import {
 import { analyseBusinessMaterial, RegistrationFields } from './ai-registration.js'
 import { categories, matchCategory } from '../data/categories.js'
 import { createListing, autoRequestUnapprovedFeatures, adminRequestNotice } from './listing-create.js'
+import { sendAdminNotice, pendingVerificationButtons, reviewRequestButtons, submissionNoticeBody } from './admin-notice.js'
 import { getApprovedCategories } from './approved-data.js'
 import { categoryDecision } from './category-match.js'
 import { toFullPhone, classifyPhone } from './phone.js'
@@ -952,7 +953,11 @@ async function submitRegistration(phone: string, context: any) {
     })
     const adminNotice = adminRequestNotice(result.name, result.businessId, newRequests)
     if (adminNotice && process.env.ADMIN_WHATSAPP) {
-      await sendWhatsAppMessage(process.env.ADMIN_WHATSAPP, adminNotice).catch(() => {})
+      await sendAdminNotice(
+        process.env.ADMIN_WHATSAPP,
+        adminNotice,
+        reviewRequestButtons(result.name)
+      ).catch(() => {})
     }
   } catch (err) {
     logOnboarding('auto_location_request_failed', {
@@ -965,21 +970,23 @@ async function submitRegistration(phone: string, context: any) {
   // sends the same card) — with the verify commands ready to copy.
   if (process.env.ADMIN_WHATSAPP) {
     const cats = Array.isArray(result.categories) ? result.categories.join(', ') : ''
-    await sendWhatsAppMessage(
+    await sendAdminNotice(
       process.env.ADMIN_WHATSAPP,
-      [
-        '🆕 NEW BUSINESS PENDING VERIFICATION',
-        '',
-        `Name: ${result.name}`,
-        `ID: ${result.businessId}`,
-        `Category: ${cats || '—'}`,
-        `Location: ${result.city || 'Zimbabwe (whole country)'}`,
-        `Phone: ${listingData.phone || phone}`,
-        ...(listingData.calls ? [`Calls: ${listingData.calls}`] : []),
-        ...(listingData.requestedCategory ? [`Owner described category as: ${listingData.requestedCategory}`] : []),
-        'Reply *pending* then *verify 1*, or *verify <name> 30*.',
-        `Approve: ${SITE_URL}/admin`,
-      ].join('\n')
+      submissionNoticeBody({
+        title: '🆕 NEW BUSINESS PENDING VERIFICATION',
+        name: result.name,
+        code: result.businessId,
+        category: cats,
+        location: result.city || '',
+        phone: listingData.phone || phone,
+        extra: [
+          ...(listingData.calls ? [`Calls: ${listingData.calls}`] : []),
+          ...(listingData.requestedCategory
+            ? [`Owner described category as: ${listingData.requestedCategory}`]
+            : []),
+        ],
+      }),
+      pendingVerificationButtons(result.name)
     ).catch(() => {})
   }
 
