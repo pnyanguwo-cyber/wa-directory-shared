@@ -4,6 +4,7 @@
  */
 
 import { getCached, setCached } from './ai-cache.js'
+import { checkAiBudget, shouldLogBudgetBlock } from './ai-budget.js'
 import { hasGeminiKey, callGeminiJson, generateGeminiText, type GeminiPart, GEMINI_MODEL, GEMINI_TIMEOUT, GEMINI_VISION_TIMEOUT } from './gemini.js'
 
 // USD per 1M tokens (https://ai.google.dev/pricing). Unknown models fall back
@@ -69,8 +70,30 @@ async function logBotUsage(params: UsageLogParams): Promise<void> {
 async function fetchGeminiBot(
   body: unknown,
   timeoutMs = GEMINI_TIMEOUT
-): Promise<{ text: string | null; model: string }> {
+): Promise<{ text: string | null; model: string; budgetBlocked?: boolean }> {
   return generateGeminiText(body, timeoutMs)
+}
+
+// A capped day is high volume by definition, so leave one visible row every
+// ten minutes instead of one per message.
+async function logBudgetBlock(
+  model: string,
+  logParams?: { feature: string; businessId?: string | null; channel?: string; metadata?: Record<string, unknown> }
+): Promise<void> {
+  if (!shouldLogBudgetBlock()) return
+  const budget = await checkAiBudget()
+  await logBotUsage({
+    feature: logParams?.feature || 'bot',
+    model,
+    inputTokens: 0,
+    outputTokens: 0,
+    latencyMs: 0,
+    status: 'blocked_daily_budget',
+    errorMessage: `Daily AI budget reached ($${budget.spent.toFixed(2)} of $${budget.limit})`,
+    businessId: logParams?.businessId || null,
+    channel: logParams?.channel || 'whatsapp',
+    metadata: { ...(logParams?.metadata || {}), spentUsd: budget.spent, limitUsd: budget.limit },
+  })
 }
 
 export async function callGemini(
@@ -79,7 +102,10 @@ export async function callGemini(
 ): Promise<string | null> {
   const start = Date.now()
   const result = await fetchGeminiBot({ contents: [{ parts: [{ text: prompt }] }] })
-  if (!result.text) return null
+  if (!result.text) {
+    if (result.budgetBlocked) await logBudgetBlock(result.model, logParams)
+    return null
+  }
   const inputTokens = estimateTokens(prompt)
   const outputTokens = estimateTokens(result.text)
   await logBotUsage({
@@ -103,7 +129,10 @@ export async function callGeminiParts(
   const start = Date.now()
   const body = { contents: [{ parts }] }
   const result = await fetchGeminiBot(body, GEMINI_VISION_TIMEOUT)
-  if (!result.text) return null
+  if (!result.text) {
+    if (result.budgetBlocked) await logBudgetBlock(result.model, logParams)
+    return null
+  }
   const inputTokens = estimateTokens(JSON.stringify(body))
   const outputTokens = estimateTokens(result.text)
   await logBotUsage({

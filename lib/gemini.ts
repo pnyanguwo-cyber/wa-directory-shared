@@ -1,4 +1,5 @@
 import { getCached, setCached } from './ai-cache.js'
+import { checkAiBudget } from './ai-budget.js'
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
 
@@ -39,7 +40,17 @@ export const GEMINI_VISION_TIMEOUT = 25_000
 export async function generateGeminiText(
   body: unknown,
   timeoutMs = GEMINI_TIMEOUT
-): Promise<{ text: string | null; model: string }> {
+): Promise<{ text: string | null; model: string; budgetBlocked?: boolean }> {
+  // Spend ceiling: past the day's limit no request reaches Google at all.
+  // Callers already have non-AI fallbacks for a null result.
+  const budget = await checkAiBudget()
+  if (!budget.allowed) {
+    console.warn(
+      `[gemini] daily budget reached ($${budget.spent.toFixed(2)} of $${budget.limit}), skipping`
+    )
+    return { text: null, model: GEMINI_MODEL_CANDIDATES[0], budgetBlocked: true }
+  }
+
   const deadline = Date.now() + timeoutMs * 2
   let lastStatus = 0
   let lastMessage = ''
