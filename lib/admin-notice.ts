@@ -3,7 +3,7 @@
  *
  * WhatsApp's button message carries at most three reply buttons; everything
  * else stays a typed command. Button ids are exactly the command we would have
- * typed (`verify <name> 30`, `pending`, `requests`), so a tap runs the same
+ * typed (`verify <name>`, `trial <name>`, `pending`), so a tap runs the same
  * handler as the text - no second code path to keep in sync.
  */
 
@@ -12,25 +12,35 @@ import { SITE_URL } from './site-url.js'
 
 export type AdminNoticeButton = InteractiveButton
 
-/** The three things an admin does with a freshly submitted listing. */
+/**
+ * The three things an admin does with a freshly submitted listing.
+ *
+ * `verify <name>` carries no day count on purpose: the bot then checks whether
+ * the owner asked for the 90-day free trial and starts that trial, otherwise
+ * it grants the usual 30 days. Typing `verify <name> 30` would force the
+ * 30-day grant and leave a trial request pending.
+ */
 export function pendingVerificationButtons(businessName: string): AdminNoticeButton[] {
   const name = businessName.trim()
   return [
     name
-      ? { id: `verify ${name} 30`, title: '✅ Verify 30 days' }
-      : { id: 'pending', title: '✅ Verify 30 days' },
+      ? { id: `verify ${name}`, title: '✅ Approve' }
+      : { id: 'pending', title: '✅ Approve' },
+    name
+      ? { id: `trial ${name}`, title: '🆓 90-day trial' }
+      : { id: 'pending', title: '🆓 90-day trial' },
     { id: 'pending', title: '🕵️ Pending list' },
-    { id: 'requests', title: '🗂 Requests' },
   ]
 }
 
 /** Same actions for a location/category request raised by a submission. */
 export function reviewRequestButtons(businessName: string): AdminNoticeButton[] {
+  const name = businessName.trim()
   return [
     { id: 'requests', title: '🗂 Requests' },
     { id: 'pending', title: '🕵️ Pending list' },
-    ...(businessName.trim()
-      ? [{ id: `verify ${businessName.trim()} 30`, title: '✅ Verify 30d' }]
+    ...(name
+      ? [{ id: `verify ${name}`, title: '✅ Approve' }]
       : []),
   ]
 }
@@ -77,7 +87,9 @@ export function submissionNoticeBody(fields: {
     `Phone: ${fields.phone}`,
     ...(fields.extra || []),
     '',
-    'Tap a button, or reply *pending* then *verify 1*.',
+    '✅ Approve = 90-day trial if they asked for one, otherwise 30 days.',
+    '🆓 90-day trial = start the full trial now.',
+    'Or reply *pending* then *verify 1* / *verify 1 30*.',
     `Approve: ${SITE_URL}/admin`,
   ].join('\n')
 }
