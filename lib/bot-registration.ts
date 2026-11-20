@@ -28,6 +28,8 @@ import {
 import { analyseBusinessMaterial, RegistrationFields } from './ai-registration.js'
 import { categories, matchCategory } from '../data/categories.js'
 import { createListing, autoRequestUnapprovedFeatures, adminRequestNotice } from './listing-create.js'
+import { getApprovedCategories } from './approved-data.js'
+import { categoryDecision } from './category-match.js'
 import { toFullPhone, classifyPhone } from './phone.js'
 import { SITE_URL } from './site-url.js'
 import { requestTrial } from './trial-helpers.js'
@@ -779,17 +781,22 @@ async function handleFieldCollection(phone: string, text: string, context: any) 
       )
       return
     }
-    // The AI/bot may suggest an approved category, but it never gets the last
-    // word: the owner's own wording is kept on the listing so the admin can
-    // confirm the match or make it a new category.
-    const answer = currentFieldKey === 'category' ? (matchCategory(text) || 'Other') : text
+    // A category is applied only when the words are unambiguous (exact, a
+    // one-letter typo, or the same words with filler removed). Otherwise the
+    // owner's wording is kept and a request goes to the admin - the listing is
+    // never filed under a guess without a human seeing it.
+    let answer = text
+    let categoryNote = ''
     if (currentFieldKey === 'category') {
-      const asked = text.trim()
-      if (asked && asked.toLowerCase() !== answer.toLowerCase()) {
-        setFieldValue(fields, 'requested_category', asked)
+      const decision = categoryDecision(text, await getApprovedCategories())
+      answer = decision.category
+      if (decision.applied === 'unresolved') {
+        setFieldValue(fields, 'requested_category', decision.requested)
+        categoryNote = `📝 Noted: *${decision.requested}* is not a category yet - I've sent it to our team, who will confirm it.`
       }
     }
     setFieldValue(fields, currentFieldKey, answer)
+    if (categoryNote) await sendWhatsAppMessage(phone, categoryNote)
   }
 
   const nextIndex = index + 1
