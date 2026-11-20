@@ -1,0 +1,79 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.digitsOnly = digitsOnly;
+exports.toFullPhone = toFullPhone;
+exports.canonicalPhone = canonicalPhone;
+exports.normalizeVoicePhone = normalizeVoicePhone;
+exports.classifyPhone = classifyPhone;
+// Phone normalization. Zimbabwe-first (+263 default), tolerant of every way
+// locals actually type numbers:
+//   0773791864        → 263773791864   (national trunk 0 dropped)
+//   +263 77 379 1864  → 263773791864   (spaces/symbols ignored)
+//   263773791864      → 263773791864   (already international)
+//   00 263 773791864  → 263773791864   (international dial-out prefix)
+const DEFAULT_COUNTRY = '263';
+function stripNoise(raw) {
+    return raw.replace(/[^0-9]/g, '');
+}
+// Just the digits of any phone input — no normalization. Many checks and
+// wa.me links only care about digits.
+function digitsOnly(raw) {
+    return (raw || '').replace(/\D/g, '');
+}
+// Full international digits (no '+') for a number entered alongside a
+// selected country code. Used at registration/listing time.
+function toFullPhone(countryCode, raw) {
+    const cc = stripNoise(countryCode || '') || DEFAULT_COUNTRY;
+    let digits = stripNoise(raw || '');
+    if (digits.startsWith('00'))
+        digits = digits.slice(2);
+    // Already international with the selected country code → keep as-is.
+    if (cc && digits.startsWith(cc) && digits.length > cc.length)
+        return digits;
+    // Local trunk prefix (e.g. Zimbabwe's 0) → drop it.
+    if (digits.startsWith('0'))
+        digits = digits.slice(1);
+    return cc + digits;
+}
+// Canonical form for a number typed WITHOUT a country-code selector (login,
+// OTP, password reset). Accepts 077…, +26377…, 26377… interchangeably.
+function canonicalPhone(raw) {
+    let digits = stripNoise(raw || '');
+    if (digits.startsWith('00'))
+        digits = digits.slice(2);
+    if (digits.startsWith(DEFAULT_COUNTRY) && digits.length >= 11)
+        return digits;
+    if (digits.startsWith('0'))
+        digits = digits.slice(1);
+    return DEFAULT_COUNTRY + digits;
+}
+// Voice numbers (landlines & hotlines) are stored EXACTLY as entered, in
+// national format — 024 2123456 stays 0242123456, 999 stays 999. Forcing
+// them into +263… would corrupt them (a hotline is not dialable as
+// +263999, and wa.me links are meaningless for them).
+function normalizeVoicePhone(raw) {
+    let digits = stripNoise(raw || '');
+    if (digits.startsWith('00'))
+        digits = digits.slice(2);
+    return digits;
+}
+// Advisory classification for FREE-TYPED phone numbers collected during
+// registration. Used to warn (never block) when the number looks
+// international:
+//   'zw'    → plausibly Zimbabwean (trunk 0, +263, or bare 9-digit local)
+//   'nonzw' → looks international (country code baked in, length ≥ 11)
+//   'bad'   → too short / garbage
+function classifyPhone(raw) {
+    const digits = digitsOnly(raw);
+    if (!digits)
+        return 'bad';
+    if (digits.startsWith('263'))
+        return 'zw';
+    if (digits.startsWith('0'))
+        return 'zw';
+    if (digits.length >= 11)
+        return 'nonzw';
+    if (digits.length >= 9)
+        return 'zw';
+    return 'bad';
+}
