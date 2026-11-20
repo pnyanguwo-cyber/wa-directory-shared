@@ -3,11 +3,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.listPendingFeatureRequests = listPendingFeatureRequests;
 exports.countPendingFeatureRequests = countPendingFeatureRequests;
 exports.approveFeatureRequestById = approveFeatureRequestById;
+exports.connectFeatureRequestToCategory = connectFeatureRequestToCategory;
 exports.rejectFeatureRequestById = rejectFeatureRequestById;
 exports.renderFeatureRequestList = renderFeatureRequestList;
 const supabase_server_js_1 = require("./supabase-server.js");
 const whatsapp_js_1 = require("./whatsapp.js");
 const site_url_js_1 = require("./site-url.js");
+const approved_data_js_1 = require("./approved-data.js");
+const learned_js_1 = require("./learned.js");
 async function listPendingFeatureRequests(limit = 20) {
     try {
         const { data } = await (0, supabase_server_js_1.getSupabase)()
@@ -130,6 +133,76 @@ async function approveFeatureRequestById(id, correctedName) {
     await notifyOwner(req, `✅ Approved: *${finalName}* is now a valid ${TYPE_LABEL[req.type]} on WA Directory.`);
     return { ok: true, name: finalName, type: req.type };
 }
+/**
+ * "Connect to" for a requested category: the owner's wording is not a new
+ * category at all, it is another name for one we already have. Approving it as
+ * a new category splits the directory ("Hardware" and "Hardware & Tools" are
+ * the same shelf); connecting it files the listing under the existing category
+ * AND records the wording as a learned alias, so the next person who types it
+ * is matched automatically instead of raising another request.
+ */
+async function connectFeatureRequestToCategory(id, targetName) {
+    const req = await loadRequest(id);
+    if (!req)
+        return { ok: false, error: 'Request not found.' };
+    if (req.type !== 'category') {
+        return { ok: false, error: `*${req.name}* is a ${TYPE_LABEL[req.type]} request - only categories can be connected.` };
+    }
+    if (req.status !== 'pending')
+        return { ok: false, error: `Already ${req.status}.` };
+    const target = (targetName || '').trim();
+    if (!target)
+        return { ok: false, error: 'Which existing category should it connect to?' };
+    const approved = await (0, approved_data_js_1.getApprovedCategories)();
+    const match = approved.find(c => c.name.toLowerCase() === target.toLowerCase());
+    if (!match) {
+        const close = approved
+            .map(c => c.name)
+            .filter(n => n.toLowerCase().includes(target.toLowerCase()) || target.toLowerCase().includes(n.toLowerCase()))
+            .slice(0, 5);
+        return {
+            ok: false,
+            error: `*${target}* is not an approved category, so there is nothing to connect to.` +
+                (close.length ? `\nClosest: ${close.join(', ')}` : '') +
+                `\nUse *approve req* to create it instead.`,
+        };
+    }
+    const canonical = match.name;
+    const supabase = (0, supabase_server_js_1.getSupabase)();
+    if (req.business_id) {
+        const { data: biz } = await supabase
+            .from('businesses')
+            .select('category, requested_category')
+            .eq('id', req.business_id)
+            .maybeSingle();
+        if (biz) {
+            const current = biz.category || [];
+            let next = current.map(n => (n === req.name ? canonical : n));
+            const provisional = (biz.requested_category || '').trim().toLowerCase();
+            const replacesPlaceholder = !!provisional && provisional === req.name.toLowerCase();
+            if (replacesPlaceholder || current.length === 0) {
+                next = next.filter(n => n !== 'Other');
+                if (!next.some(n => n.toLowerCase() === canonical.toLowerCase()))
+                    next = [canonical, ...next];
+            }
+            if (!next.some(n => n.toLowerCase() === canonical.toLowerCase()))
+                next.push(canonical);
+            await supabase
+                .from('businesses')
+                .update(replacesPlaceholder ? { category: next, requested_category: '' } : { category: next })
+                .eq('id', req.business_id);
+        }
+    }
+    // Remember the wording for every future listing, even if this request was
+    // never attached to a business.
+    const learned = await (0, learned_js_1.learnMapping)('category', req.name, canonical);
+    await supabase
+        .from('feature_requests')
+        .update({ status: 'approved', corrected_name: canonical })
+        .eq('id', req.id);
+    await notifyOwner(req, `✅ Thanks! We've filed *${req.name}* under the existing *${canonical}* category on WA Directory, so buyers searching either word will find you.`);
+    return { ok: true, name: canonical, alias: req.name };
+}
 async function rejectFeatureRequestById(id) {
     const req = await loadRequest(id);
     if (!req)
@@ -173,6 +246,6 @@ function renderFeatureRequestList(rows, total) {
         lines.push(`${i + 1}. [${r.type}] *${r.name}*${where}`);
         lines.push(`   ${r.business_name}`);
     });
-    lines.push('', 'Reply *approve req 1* · *approve req 1 <correct name>* · *reject req 1*');
+    lines.push('', 'Reply *approve req 1* · *approve req 1 <correct name>* · *reject req 1*', 'Same as an existing category? *connect req 1 <existing category>* keeps the directory tidy.');
     return lines.join('\n');
 }

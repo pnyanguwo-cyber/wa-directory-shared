@@ -1,6 +1,8 @@
 import { getSupabase } from './supabase-server.js'
 import { sendWhatsAppMessage } from './whatsapp.js'
 import { SITE_URL } from './site-url.js'
+import { getApprovedCategories } from './approved-data.js'
+import { learnMapping } from './learned.js'
 
 /**
  * Admin review of category / city / area requests, usable from WhatsApp.
@@ -155,6 +157,87 @@ export async function approveFeatureRequestById(
   return { ok: true, name: finalName, type: req.type }
 }
 
+/**
+ * "Connect to" for a requested category: the owner's wording is not a new
+ * category at all, it is another name for one we already have. Approving it as
+ * a new category splits the directory ("Hardware" and "Hardware & Tools" are
+ * the same shelf); connecting it files the listing under the existing category
+ * AND records the wording as a learned alias, so the next person who types it
+ * is matched automatically instead of raising another request.
+ */
+export async function connectFeatureRequestToCategory(
+  id: string,
+  targetName: string
+): Promise<{ ok: boolean; error?: string; name?: string; alias?: string }> {
+  const req = await loadRequest(id)
+  if (!req) return { ok: false, error: 'Request not found.' }
+  if (req.type !== 'category') {
+    return { ok: false, error: `*${req.name}* is a ${TYPE_LABEL[req.type]} request - only categories can be connected.` }
+  }
+  if (req.status !== 'pending') return { ok: false, error: `Already ${req.status}.` }
+
+  const target = (targetName || '').trim()
+  if (!target) return { ok: false, error: 'Which existing category should it connect to?' }
+
+  const approved = await getApprovedCategories()
+  const match = approved.find(c => c.name.toLowerCase() === target.toLowerCase())
+  if (!match) {
+    const close = approved
+      .map(c => c.name)
+      .filter(n => n.toLowerCase().includes(target.toLowerCase()) || target.toLowerCase().includes(n.toLowerCase()))
+      .slice(0, 5)
+    return {
+      ok: false,
+      error:
+        `*${target}* is not an approved category, so there is nothing to connect to.` +
+        (close.length ? `\nClosest: ${close.join(', ')}` : '') +
+        `\nUse *approve req* to create it instead.`,
+    }
+  }
+
+  const canonical = match.name
+  const supabase = getSupabase()
+
+  if (req.business_id) {
+    const { data: biz } = await supabase
+      .from('businesses')
+      .select('category, requested_category')
+      .eq('id', req.business_id)
+      .maybeSingle()
+    if (biz) {
+      const current: string[] = biz.category || []
+      let next = current.map(n => (n === req.name ? canonical : n))
+      const provisional = (biz.requested_category || '').trim().toLowerCase()
+      const replacesPlaceholder = !!provisional && provisional === req.name.toLowerCase()
+      if (replacesPlaceholder || current.length === 0) {
+        next = next.filter(n => n !== 'Other')
+        if (!next.some(n => n.toLowerCase() === canonical.toLowerCase())) next = [canonical, ...next]
+      }
+      if (!next.some(n => n.toLowerCase() === canonical.toLowerCase())) next.push(canonical)
+      await supabase
+        .from('businesses')
+        .update(replacesPlaceholder ? { category: next, requested_category: '' } : { category: next })
+        .eq('id', req.business_id)
+    }
+  }
+
+  // Remember the wording for every future listing, even if this request was
+  // never attached to a business.
+  const learned = await learnMapping('category', req.name, canonical)
+
+  await supabase
+    .from('feature_requests')
+    .update({ status: 'approved', corrected_name: canonical })
+    .eq('id', req.id)
+
+  await notifyOwner(
+    req,
+    `✅ Thanks! We've filed *${req.name}* under the existing *${canonical}* category on WA Directory, so buyers searching either word will find you.`
+  )
+
+  return { ok: true, name: canonical, alias: req.name }
+}
+
 export async function rejectFeatureRequestById(
   id: string
 ): Promise<{ ok: boolean; error?: string; name?: string; type?: FeatureRequestType }> {
@@ -205,6 +288,10 @@ export function renderFeatureRequestList(rows: PendingFeatureRequest[], total: n
     lines.push(`${i + 1}. [${r.type}] *${r.name}*${where}`)
     lines.push(`   ${r.business_name}`)
   })
-  lines.push('', 'Reply *approve req 1* · *approve req 1 <correct name>* · *reject req 1*')
+  lines.push(
+    '',
+    'Reply *approve req 1* · *approve req 1 <correct name>* · *reject req 1*',
+    'Same as an existing category? *connect req 1 <existing category>* keeps the directory tidy.'
+  )
   return lines.join('\n')
 }

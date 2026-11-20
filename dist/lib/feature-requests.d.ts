@@ -34,6 +34,20 @@ export declare function approveFeatureRequestById(id: string, correctedName?: st
     name?: string;
     type?: FeatureRequestType;
 }>;
+/**
+ * "Connect to" for a requested category: the owner's wording is not a new
+ * category at all, it is another name for one we already have. Approving it as
+ * a new category splits the directory ("Hardware" and "Hardware & Tools" are
+ * the same shelf); connecting it files the listing under the existing category
+ * AND records the wording as a learned alias, so the next person who types it
+ * is matched automatically instead of raising another request.
+ */
+export declare function connectFeatureRequestToCategory(id: string, targetName: string): Promise<{
+    ok: boolean;
+    error?: string;
+    name?: string;
+    alias?: string;
+}>;
 export declare function rejectFeatureRequestById(id: string): Promise<{
     ok: boolean;
     error?: string;

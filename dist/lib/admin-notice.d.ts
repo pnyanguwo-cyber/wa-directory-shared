@@ -17,8 +17,16 @@ export type AdminNoticeButton = InteractiveButton;
  * 30-day grant and leave a trial request pending.
  */
 export declare function pendingVerificationButtons(businessName: string): AdminNoticeButton[];
-/** Same actions for a location/category request raised by a submission. */
-export declare function reviewRequestButtons(businessName: string): AdminNoticeButton[];
+/**
+ * Same actions for a location/category request raised by a submission.
+ *
+ * When the submission asked for a category, the middle button is "Connect to":
+ * many requests are just another name for a category we already have, and
+ * approving them as new ones splits the directory. Three buttons is the
+ * WhatsApp maximum, so the pending list gives way to the connect action when
+ * it applies.
+ */
+export declare function reviewRequestButtons(businessName: string, hasCategoryRequest?: boolean): AdminNoticeButton[];
 /**
  * Send an admin notice as buttons, falling back to plain text (with the
  * commands spelled out) when Meta rejects the interactive payload.

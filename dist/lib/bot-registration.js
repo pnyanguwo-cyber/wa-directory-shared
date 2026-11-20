@@ -814,7 +814,8 @@ async function submitRegistration(phone, context) {
         });
         const adminNotice = (0, listing_create_js_1.adminRequestNotice)(result.name, result.businessId, newRequests);
         if (adminNotice && process.env.ADMIN_WHATSAPP) {
-            await (0, admin_notice_js_1.sendAdminNotice)(process.env.ADMIN_WHATSAPP, adminNotice, (0, admin_notice_js_1.reviewRequestButtons)(result.name)).catch(() => { });
+            const hasCategoryRequest = newRequests.some(l => l.startsWith('category:'));
+            await (0, admin_notice_js_1.sendAdminNotice)(process.env.ADMIN_WHATSAPP, adminNotice, (0, admin_notice_js_1.reviewRequestButtons)(result.name, hasCategoryRequest)).catch(() => { });
         }
     }
     catch (err) {

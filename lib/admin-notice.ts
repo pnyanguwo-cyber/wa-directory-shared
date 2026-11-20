@@ -33,15 +33,32 @@ export function pendingVerificationButtons(businessName: string): AdminNoticeBut
   ]
 }
 
-/** Same actions for a location/category request raised by a submission. */
-export function reviewRequestButtons(businessName: string): AdminNoticeButton[] {
+/**
+ * Same actions for a location/category request raised by a submission.
+ *
+ * When the submission asked for a category, the middle button is "Connect to":
+ * many requests are just another name for a category we already have, and
+ * approving them as new ones splits the directory. Three buttons is the
+ * WhatsApp maximum, so the pending list gives way to the connect action when
+ * it applies.
+ */
+export function reviewRequestButtons(
+  businessName: string,
+  hasCategoryRequest = false
+): AdminNoticeButton[] {
   const name = businessName.trim()
+  const tail = name ? [{ id: `verify ${name}`, title: '✅ Approve' }] : []
+  if (hasCategoryRequest) {
+    return [
+      { id: 'requests', title: '🗂 Requests' },
+      { id: 'connect req', title: '🔗 Connect to' },
+      ...tail,
+    ]
+  }
   return [
     { id: 'requests', title: '🗂 Requests' },
     { id: 'pending', title: '🕵️ Pending list' },
-    ...(name
-      ? [{ id: `verify ${name}`, title: '✅ Approve' }]
-      : []),
+    ...tail,
   ]
 }
 

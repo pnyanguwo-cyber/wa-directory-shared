@@ -953,10 +953,11 @@ async function submitRegistration(phone: string, context: any) {
     })
     const adminNotice = adminRequestNotice(result.name, result.businessId, newRequests)
     if (adminNotice && process.env.ADMIN_WHATSAPP) {
+      const hasCategoryRequest = newRequests.some(l => l.startsWith('category:'))
       await sendAdminNotice(
         process.env.ADMIN_WHATSAPP,
         adminNotice,
-        reviewRequestButtons(result.name)
+        reviewRequestButtons(result.name, hasCategoryRequest)
       ).catch(() => {})
     }
   } catch (err) {
