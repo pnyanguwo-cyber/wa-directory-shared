@@ -1,5 +1,26 @@
 const WHATSAPP_API = 'https://graph.facebook.com/v18.0'
 
+// ── Outbound transcript hook ──────────────────────────────────────────────
+// Shared flows (registration, verification, listing intake) send through this
+// module directly, bypassing the bot's logging wrappers - which is why bot
+// replies never appeared in the admin transcript. The bot registers a logger
+// here once, and every send is mirrored into bot_messages exactly once.
+type OutboundLogger = (to: string, kind: string, body: string) => void
+let outboundLogger: OutboundLogger | null = null
+
+export function setOutboundLogger(logger: OutboundLogger | null) {
+  outboundLogger = logger
+}
+
+function transcript(to: string, kind: string, body: string) {
+  if (!outboundLogger || !to) return
+  try {
+    outboundLogger(to, kind, body)
+  } catch {
+    // Transcript logging must never break a send.
+  }
+}
+
 async function postToWhatsApp(phoneNumberId: string, accessToken: string, payload: unknown): Promise<boolean> {
   try {
     // Test mode: log instead of sending so message-flow changes can be
@@ -30,16 +51,17 @@ async function postToWhatsApp(phoneNumberId: string, accessToken: string, payloa
   }
 }
 
-export async function sendWhatsAppMessage(to: string, message: string, replyTo?: string) {
+export async function sendWhatsAppMessage(to: string, message: string, replyTo?: string): Promise<boolean> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
 
   if (!phoneNumberId || !accessToken) {
     console.warn('[whatsapp] Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN')
-    return
+    return false
   }
 
-  await postToWhatsApp(phoneNumberId, accessToken, {
+  transcript(to, 'text', message)
+  return postToWhatsApp(phoneNumberId, accessToken, {
     messaging_product: 'whatsapp',
     to,
     type: 'text',
@@ -82,6 +104,7 @@ export async function markRead(messageId: string, typing = false) {
 // phone's location button. Falls back to a plain-text ask when the
 // business account doesn't support the template type.
 export async function sendLocationRequest(to: string, body: string) {
+  transcript(to, 'location_req', body)
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
   if (!phoneNumberId || !accessToken) {
@@ -245,6 +268,7 @@ export async function sendCtaUrl(to: string, body: string, displayText: string, 
   }
 
   const cleanBody = clip(body, 1024)
+  transcript(to, 'cta', `${cleanBody}\n→ ${url}`)
   if (process.env.WHATSAPP_DRY_RUN === '1') {
     console.log(
       `[whatsapp][dry-run][cta_url] to=${to} [${clip(displayText, 25)}] → ${url}\n${cleanBody}`
@@ -290,6 +314,8 @@ export async function sendInteractiveList(
     description: r.description ? clip(r.description, 72) : undefined,
   }))
 
+  transcript(to, 'list', `${body}\n↳ rows: ${safeRows.map(r => r.title).join(' | ')}`)
+
   await postInteractive(
     to,
     'list',
@@ -322,6 +348,8 @@ export async function sendInteractiveButtons(
     await sendWhatsAppMessage(to, clip(body, 4096))
     return
   }
+
+  transcript(to, 'buttons', `${body}\n[${safeButtons.map(b => b.reply.title).join(' | ')}]`)
 
   await postInteractive(
     to,
@@ -358,6 +386,7 @@ export async function sendInteractiveImageCard(
   }
 
   const cleanBody = bodyText(body)
+  transcript(to, 'buttons', `${cleanBody}\n[${safeButtons.map(b => b.reply.title).join(' | ')}]`)
   const card = {
     type: 'button' as const,
     ...(imageUrl ? { header: { type: 'image' as const, image: { link: imageUrl } } } : {}),
@@ -402,16 +431,17 @@ export async function sendWhatsAppTemplate(
   templateName: string,
   params: string[] = [],
   language = 'en'
-) {
+): Promise<boolean> {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN
 
   if (!phoneNumberId || !accessToken) {
     console.warn('[whatsapp] Missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_ACCESS_TOKEN')
-    return
+    return false
   }
 
-  await postToWhatsApp(phoneNumberId, accessToken, {
+  transcript(to, 'template', [templateName, ...params].join(' | '))
+  return postToWhatsApp(phoneNumberId, accessToken, {
     messaging_product: 'whatsapp',
     to,
     type: 'template',
@@ -442,6 +472,7 @@ export async function sendWhatsAppDocument(
     return false
   }
 
+  transcript(to, 'document', `${filename} (${mime})`)
   if (process.env.WHATSAPP_DRY_RUN === '1') {
     console.log(`[whatsapp][dry-run][document] to=${to} ${filename} (${mime}, ${content.length} bytes)`)
     return true
@@ -496,6 +527,7 @@ export async function sendWhatsAppImage(
     return false
   }
 
+  transcript(to, 'image', caption || imageUrl)
   if (process.env.WHATSAPP_DRY_RUN === '1') {
     console.log(`[whatsapp][dry-run][image] to=${to} ${imageUrl}\n${caption}`)
     return true

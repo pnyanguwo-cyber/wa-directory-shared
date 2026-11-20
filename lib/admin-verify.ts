@@ -2,6 +2,41 @@ import { getSupabase } from './supabase-server.js'
 import { sendWhatsAppMessage, sendWhatsAppTemplate } from './whatsapp.js'
 import { SITE_URL } from './site-url.js'
 import { digitsOnly } from './phone.js'
+import { getBotSetting } from './bot-settings.js'
+
+// Portal access for a business that registered through WhatsApp: it never chose
+// a password, so "log in with @username" alone leaves the owner locked out.
+// When no account exists yet, hand over the account-setup link instead.
+async function portalAccessLines(biz: {
+  id: string
+  username?: string | null
+}): Promise<string[]> {
+  const login = biz.username
+    ? `🔑 Portal: ${SITE_URL}/portal (log in with @${biz.username})`
+    : `🔑 Portal: ${SITE_URL}/portal`
+  try {
+    const supabase = getSupabase()
+    const { data: account } = await supabase
+      .from('business_accounts')
+      .select('id')
+      .eq('business_id', biz.id)
+      .maybeSingle()
+    if (account) return [login]
+    const { data: row } = await supabase
+      .from('businesses')
+      .select('edit_token')
+      .eq('id', biz.id)
+      .maybeSingle()
+    const token = (row as { edit_token?: string | null } | null)?.edit_token || ''
+    if (!token) return [login]
+    return [
+      `🔐 Create your portal password: ${SITE_URL}/account-setup?token=${token}`,
+      `✏️ Edit your listing: ${SITE_URL}/edit?token=${token}`,
+    ]
+  } catch {
+    return [login]
+  }
+}
 
 // Shared admin-verify engine: the WhatsApp bot and the dashboard mirror the
 // same rules here — fuzzy name lookup, day-based grants, and the "you are
@@ -178,44 +213,61 @@ export async function notifyBusinessLive(biz: {
   const to = '+' + digitsOnly(biz.phone)
   const slug = biz.slug || biz.id
 
+  const portalLines = await portalAccessLines(biz)
+  const details = [
+    '🎉 *You are live on WA Directory!*',
+    '',
+    `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} - customers can find you and your products in search now.`,
+    '',
+    `🏢 Profile: ${SITE_URL}/business/${slug}`,
+    `🌐 Website: ${SITE_URL}/site/${slug}`,
+    ...portalLines,
+    '',
+    '*How to add products to your online shop*',
+    '📸 Send a product photo, then reply or caption it with *name and price* (e.g. *bread $2*) - it lands on your website shop shelf.',
+    '',
+    'Reply *help* anytime.',
+  ].join('\n')
+
+  // Free-form first: it carries every detail, and it works whenever the owner
+  // has messaged recently (they just registered and were searching while they
+  // waited). Sending the details here also means a missing/renamed Meta
+  // template can no longer swallow the whole go-live message.
+  //
   // Serverless freezes the function the instant the last awaited task ends,
-  // killing any send still in flight — so every send here is awaited. Each is
-  // wrapped so one failure never blocks the next.
+  // killing any send still in flight - so every send is awaited.
+  const sent = await sendWhatsAppMessage(to, details)
+  if (sent) return
+
+  // Outside the 24-hour window free-form text is rejected. Fall back to the
+  // approved template, then make sure the admin can still deliver the links.
+  let templateOk = false
   try {
-    await sendWhatsAppTemplate(
+    templateOk = await sendWhatsAppTemplate(
       to,
       process.env.WHATSAPP_TEMPLATE_APPROVED || 'you_are_live',
       [biz.name, `${SITE_URL}/business/${slug}`]
     )
   } catch (e) {
-    console.error('[admin-verify] you_are_live template failed:', e)
+    console.error('[admin-verify] go-live template failed:', e)
   }
+  if (templateOk) return
 
-  const links = [
-    `🏢 Profile: ${SITE_URL}/business/${slug}`,
-    `🌐 Website: ${SITE_URL}/site/${slug}`,
-    ...(biz.username ? [`🔑 Portal: ${SITE_URL}/portal (log in with @${biz.username})`] : []),
-  ]
-  try {
-    await sendWhatsAppMessage(
-      to,
-      [
-        '🎉 *You are live on WA Directory!*',
-        '',
-        `${biz.name} is approved${biz.username ? ` (@${biz.username})` : ''} - customers can find you and your products in search now.`,
-        '',
-        ...links,
-        '',
-        '*How To Add products to your Online Shop*',
-        '📸 Send a product photo, then reply or caption it with *name and price* (e.g. *bread $2*) - it lands on your website shop shelf.',
-        '',
-        "Don't forget to join our channel to get updates and ask questions.",
-        '',
-        'Reply *help* anytime.',
-      ].join('\n')
-    )
-  } catch (e) {
-    console.error('[admin-verify] go-live links message failed:', e)
+  const admin = (process.env.ADMIN_WHATSAPP || '').replace(/\D/g, '')
+  if (admin) {
+    try {
+      await sendWhatsAppMessage(
+        '+' + admin,
+        [
+          `⚠️ Go-live message could not reach *${biz.name}* (+${digitsOnly(biz.phone)}).`,
+          'Meta blocked free-form text (24h window closed) and the approved template is not configured.',
+          'Ask them to send *hi* to the bot, then run *welcome ' + biz.name + '* to resend these details:',
+          '',
+          details,
+        ].join('\n')
+      )
+    } catch (e) {
+      console.error('[admin-verify] admin delivery alert failed:', e)
+    }
   }
-
 }
