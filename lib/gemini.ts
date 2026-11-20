@@ -1,5 +1,6 @@
 import { getCached, setCached } from './ai-cache.js'
 import { checkAiBudget } from './ai-budget.js'
+import { markAiQuotaExhausted } from './ai-limit.js'
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
 
@@ -95,6 +96,9 @@ export async function generateGeminiText(
   console.warn(
     `[gemini] every model failed (last ${lastStatus || 'network'}: ${String(lastMessage).slice(0, 160)})`
   )
+  // Every model refusing with 429 is the day's quota, not a blip: remember when
+  // it clears so customers can be told the exact time instead of a dead end.
+  if (lastStatus === 429) await markAiQuotaExhausted()
   return { text: null, model: usedModel }
 }
 
