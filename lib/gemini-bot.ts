@@ -4,7 +4,7 @@
  */
 
 import { getCached, setCached } from './ai-cache.js'
-import { hasGeminiKey, callGeminiJson, type GeminiPart, GEMINI_MODEL, GEMINI_URL, GEMINI_TIMEOUT, GEMINI_VISION_TIMEOUT } from './gemini.js'
+import { hasGeminiKey, callGeminiJson, generateGeminiText, type GeminiPart, GEMINI_MODEL, GEMINI_TIMEOUT, GEMINI_VISION_TIMEOUT } from './gemini.js'
 
 const GEMINI_PRICING: Record<string, { input: number; output: number }> = {
   'gemini-1.5-flash': { input: 0.075, output: 0.30 },
@@ -56,29 +56,13 @@ async function logBotUsage(params: UsageLogParams): Promise<void> {
   }
 }
 
+// Same entry point as the text path: it walks the model chain and logs the
+// provider error, so a photo that cannot be read says why in the logs.
 async function fetchGeminiBot(
   body: unknown,
   timeoutMs = GEMINI_TIMEOUT
 ): Promise<{ text: string | null }> {
-  const start = Date.now()
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
-    const data = await res.json()
-    if (!res.ok) return { text: null }
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
-    return { text }
-  } catch {
-    return { text: null }
-  } finally {
-    clearTimeout(timer)
-  }
+  return generateGeminiText(body, timeoutMs)
 }
 
 export async function callGemini(

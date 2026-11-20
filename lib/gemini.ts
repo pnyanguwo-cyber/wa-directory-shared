@@ -1,7 +1,27 @@
 import { getCached, setCached } from './ai-cache.js'
 
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash'
-export const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`
+
+// Google caps each model's free-tier daily quota separately and retires models
+// without notice, so one exhausted or removed model must not take every AI
+// feature down with it. Walk the chain until one answers: the last two keep
+// photo recognition alive when the flagship model is out of quota.
+export const GEMINI_MODEL_CANDIDATES: string[] = Array.from(
+  new Set(
+    [
+      GEMINI_MODEL,
+      'gemini-3.8-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-flash-lite-latest',
+    ].filter(Boolean)
+  )
+)
+const RETRIABLE_STATUS = new Set([404, 429, 503])
+
+export const buildGeminiUrl = (model: string = GEMINI_MODEL) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`
+export const GEMINI_URL = buildGeminiUrl()
 
 // Single Gemini entry point: posts one prompt, returns the trimmed first
 // candidate text — or null when the call fails or the response is empty.
@@ -9,23 +29,64 @@ export const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/mode
 export const GEMINI_TIMEOUT = 8_000
 export const GEMINI_VISION_TIMEOUT = 25_000
 
-async function fetchGemini(body: unknown, timeoutMs = GEMINI_TIMEOUT): Promise<{ text: string | null }> {
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(GEMINI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
-    const data = await res.json()
-    return { text: data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null }
-  } catch {
-    return { text: null }
-  } finally {
-    clearTimeout(timer)
+/**
+ * Posts one generateContent body, trying each candidate model in turn.
+ *
+ * Returns null when every model fails or the total deadline passes, and logs
+ * the last provider error so a quota or retired-model failure is visible in
+ * the platform logs instead of looking like "AI could not recognise this".
+ */
+export async function generateGeminiText(
+  body: unknown,
+  timeoutMs = GEMINI_TIMEOUT
+): Promise<{ text: string | null }> {
+  const deadline = Date.now() + timeoutMs * 2
+  let lastStatus = 0
+  let lastMessage = ''
+
+  for (const model of GEMINI_MODEL_CANDIDATES) {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) break
+
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, remaining))
+    try {
+      const res = await fetch(buildGeminiUrl(model), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      })
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        lastStatus = res.status
+        lastMessage = data?.error?.message || 'API error'
+        const isLast = model === GEMINI_MODEL_CANDIDATES[GEMINI_MODEL_CANDIDATES.length - 1]
+        if (RETRIABLE_STATUS.has(res.status) && !isLast) continue
+        break
+      }
+
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
+      if (text) return { text }
+      lastStatus = res.status
+      lastMessage = 'empty candidate'
+    } catch (err) {
+      lastStatus = 0
+      lastMessage = err instanceof Error ? err.message : String(err)
+    } finally {
+      clearTimeout(timer)
+    }
   }
+
+  console.warn(
+    `[gemini] every model failed (last ${lastStatus || 'network'}: ${String(lastMessage).slice(0, 160)})`
+  )
+  return { text: null }
+}
+
+async function fetchGemini(body: unknown, timeoutMs = GEMINI_TIMEOUT): Promise<{ text: string | null }> {
+  return generateGeminiText(body, timeoutMs)
 }
 
 /** Multimodal twin of callGemini for voice notes and photos: text and
