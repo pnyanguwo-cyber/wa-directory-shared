@@ -39,15 +39,17 @@ export const GEMINI_VISION_TIMEOUT = 25_000
 export async function generateGeminiText(
   body: unknown,
   timeoutMs = GEMINI_TIMEOUT
-): Promise<{ text: string | null }> {
+): Promise<{ text: string | null; model: string }> {
   const deadline = Date.now() + timeoutMs * 2
   let lastStatus = 0
   let lastMessage = ''
+  let usedModel = GEMINI_MODEL_CANDIDATES[0]
 
   for (const model of GEMINI_MODEL_CANDIDATES) {
     const remaining = deadline - Date.now()
     if (remaining <= 0) break
 
+    usedModel = model
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), Math.min(timeoutMs, remaining))
     try {
@@ -68,7 +70,7 @@ export async function generateGeminiText(
       }
 
       const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
-      if (text) return { text }
+      if (text) return { text, model }
       lastStatus = res.status
       lastMessage = 'empty candidate'
     } catch (err) {
@@ -82,7 +84,7 @@ export async function generateGeminiText(
   console.warn(
     `[gemini] every model failed (last ${lastStatus || 'network'}: ${String(lastMessage).slice(0, 160)})`
   )
-  return { text: null }
+  return { text: null, model: usedModel }
 }
 
 async function fetchGemini(body: unknown, timeoutMs = GEMINI_TIMEOUT): Promise<{ text: string | null }> {

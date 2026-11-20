@@ -6,10 +6,18 @@
 import { getCached, setCached } from './ai-cache.js'
 import { hasGeminiKey, callGeminiJson, generateGeminiText, type GeminiPart, GEMINI_MODEL, GEMINI_TIMEOUT, GEMINI_VISION_TIMEOUT } from './gemini.js'
 
+// USD per 1M tokens (https://ai.google.dev/pricing). Unknown models fall back
+// to the most expensive rate we know, so the dashboard never understates cost.
 const GEMINI_PRICING: Record<string, { input: number; output: number }> = {
-  'gemini-1.5-flash': { input: 0.075, output: 0.30 },
-  'gemini-3.8-flash': { input: 0.075, output: 0.30 },
+  'gemini-3.8-flash': { input: 0.75, output: 3.75 },
+  'gemini-3.6-flash': { input: 0.75, output: 3.75 },
+  'gemini-3.5-flash': { input: 0.75, output: 3.75 },
+  'gemini-3-flash-preview': { input: 0.75, output: 3.75 },
+  'gemini-3.5-flash-lite': { input: 0.30, output: 2.50 },
+  'gemini-flash-lite-latest': { input: 0.30, output: 2.50 },
+  'gemini-3.1-flash-lite': { input: 0.25, output: 1.50 },
 }
+const DEFAULT_PRICING = { input: 0.75, output: 3.75 }
 
 interface UsageLogParams {
   feature: string
@@ -30,7 +38,7 @@ function estimateTokens(text: string): number {
 
 async function logBotUsage(params: UsageLogParams): Promise<void> {
   try {
-    const pricing = GEMINI_PRICING[params.model] || GEMINI_PRICING['gemini-1.5-flash']
+    const pricing = GEMINI_PRICING[params.model] || DEFAULT_PRICING
     const inputCost = (params.inputTokens / 1_000_000) * pricing.input
     const outputCost = (params.outputTokens / 1_000_000) * pricing.output
     const estimatedCost = inputCost + outputCost
@@ -61,7 +69,7 @@ async function logBotUsage(params: UsageLogParams): Promise<void> {
 async function fetchGeminiBot(
   body: unknown,
   timeoutMs = GEMINI_TIMEOUT
-): Promise<{ text: string | null }> {
+): Promise<{ text: string | null; model: string }> {
   return generateGeminiText(body, timeoutMs)
 }
 
@@ -76,7 +84,7 @@ export async function callGemini(
   const outputTokens = estimateTokens(result.text)
   await logBotUsage({
     feature: logParams?.feature || 'bot',
-    model: GEMINI_MODEL,
+    model: result.model || GEMINI_MODEL,
     inputTokens,
     outputTokens,
     latencyMs: Date.now() - start,
@@ -100,7 +108,7 @@ export async function callGeminiParts(
   const outputTokens = estimateTokens(result.text)
   await logBotUsage({
     feature: logParams?.feature || 'bot',
-    model: GEMINI_MODEL,
+    model: result.model || GEMINI_MODEL,
     inputTokens,
     outputTokens,
     latencyMs: Date.now() - start,
